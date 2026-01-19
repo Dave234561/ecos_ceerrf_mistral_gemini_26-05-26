@@ -1,10 +1,17 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+interface UseWebRTCOptions {
   roomId: string;
   signalingUrl?: string;
   onRemoteStream?: (stream: MediaStream) => void;
 }
 
 // (Supprimé : utiliser useWebRTCAudio à la place)
-
+export default function useWebRTC({
+  roomId,
+  signalingUrl = 'ws://localhost:3000',
+  onRemoteStream,
+}: UseWebRTCOptions) {
   const [connected, setConnected] = useState(false);
   const localStream = useRef<MediaStream | null>(null);
   const remoteStream = useRef<MediaStream | null>(null);
@@ -39,28 +46,32 @@
   // Setup local media and peer connection
   useEffect(() => {
     async function setup() {
-      localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      peer.current = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-      localStream.current.getTracks().forEach((track) => {
-        peer.current?.addTrack(track, localStream.current!);
-      });
-      peer.current.ontrack = (event) => {
-        if (!remoteStream.current) {
-          remoteStream.current = new MediaStream();
-          if (onRemoteStream) onRemoteStream(remoteStream.current);
-        }
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.current?.addTrack(track);
+      try {
+        localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        peer.current = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        localStream.current.getTracks().forEach((track) => {
+          peer.current?.addTrack(track, localStream.current!);
         });
-      };
-      peer.current.onicecandidate = (event) => {
-        if (event.candidate) {
-          ws.current?.send(
-            JSON.stringify({ type: 'signal', roomId, signal: { candidate: event.candidate } })
-          );
-        }
-      };
-      setConnected(true);
+        peer.current.ontrack = (event) => {
+          if (!remoteStream.current) {
+            remoteStream.current = new MediaStream();
+            if (onRemoteStream) onRemoteStream(remoteStream.current);
+          }
+          event.streams[0].getTracks().forEach((track) => {
+            remoteStream.current?.addTrack(track);
+          });
+        };
+        peer.current.onicecandidate = (event) => {
+          if (event.candidate) {
+            ws.current?.send(
+              JSON.stringify({ type: 'signal', roomId, signal: { candidate: event.candidate } })
+            );
+          }
+        };
+        setConnected(true);
+      } catch (err) {
+        console.error('Error setting up WebRTC', err);
+      }
     }
     setup();
     return () => {
