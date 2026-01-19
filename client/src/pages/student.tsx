@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Play, Clock, CheckCircle2, AlertCircle, BarChart3, FileText, Calendar, CheckCircle, BookOpen, TrendingUp } from "lucide-react";
 import PatientSimulator from "@/components/ecos/PatientSimulator";
 import EvaluationReport from "@/components/ecos/EvaluationReport";
@@ -617,6 +617,7 @@ export default function StudentPage({ email: emailProp }: StudentPageProps) {
       {/* Instruction Popup - ONLY for Scenario ID 1 (Douleur de l'oreille chez l'Enfant) */}
       <Dialog open={showInstructionPopup} onOpenChange={setShowInstructionPopup}>
         <DialogContent className="max-w-4xl w-full p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Instructions pour l'examen</DialogTitle>
           <div className="relative">
             <img
               src="/images/ecos_fpv_final_v2.png"

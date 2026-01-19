@@ -17,6 +17,7 @@ import { emotionalStateService } from './emotional-state.service.js';
 export interface PatientResponse {
   response: string;
   addressing: string; // How to address the student
+  message?: string;
   medicalContext?: {
     symptomsRevealed: string[];
     questionsAnswered: string[];
@@ -25,6 +26,23 @@ export interface PatientResponse {
 }
 
 export class VirtualPatientService {
+  private sanitizePatientResponse(text: string): string {
+    if (!text) return '';
+
+    let out = text;
+
+    // Remove stage directions like *les bras croisés*, even if multiline
+    out = out.replace(/\*[\s\S]*?\*/g, '');
+
+    // Remove common role prefixes if model outputs them
+    out = out.replace(/^\s*(patient|\u00e9tudiant|etudiant)\s*:\s*/gim, '');
+
+    // Normalize whitespace
+    out = out.replace(/\n{3,}/g, '\n\n');
+    out = out.replace(/[ \t]{2,}/g, ' ');
+
+    return out.trim();
+  }
   
   /**
    * Generate virtual patient response using AI
@@ -101,6 +119,7 @@ export class VirtualPatientService {
 
       // Generate AI response with scenario-specific initial message
       const aiResponse = await this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId);
+      const cleanedResponse = this.sanitizePatientResponse(aiResponse);
 
       // Update emotional state if enabled for this scenario
       if (emotionalStateEnabled && context.emotionalState) {
@@ -128,13 +147,13 @@ export class VirtualPatientService {
 
       // Add messages to memory
       conversationMemoryService.addMessage(sessionId, query, 'student');
-      conversationMemoryService.addMessage(sessionId, aiResponse, 'patient');
+      conversationMemoryService.addMessage(sessionId, cleanedResponse, 'patient');
 
       // Extract medical context from response
-      const medicalContext = this.extractMedicalContext(aiResponse);
+      const medicalContext = this.extractMedicalContext(cleanedResponse);
 
       return {
-        response: aiResponse,
+        response: cleanedResponse,
         addressing: addressing || 'étudiant',
         medicalContext,
         message: isFallbackPrompt
@@ -256,7 +275,9 @@ INSTRUCTIONS COMPORTEMENTALES CRITIQUES:
 - ${roleInstruction}
 - Réponds de manière réaliste et cohérente avec EXACTEMENT tes symptômes décrits
 - Sois coopératif mais réaliste (certaines informations peuvent nécessiter des questions spécifiques)
-- Exprime tes émotions et préoccupations comme un vrai patient
+- Ton: conversationnel, simple, neutre (pas théâtral)
+- Ne fais AUCUNE mise en scène: pas de didascalies, pas d'actions, pas de narration
+- N'utilise jamais de texte entre astérisques (ex: *les bras croisés*, *voix tremblante*) ni de labels type "Patient:"/"Étudiant:"
 - Référence les informations déjà échangées dans la conversation
 ${context.emotionalState ? '- ADAPTE ton comportement selon ton ÉTAT ÉMOTIONNEL ACTUEL décrit ci-dessus' : ''}
 
@@ -386,7 +407,7 @@ CONTEXTE GÉNÉRAL :
 - Tu es un patient qui consulte pour un problème de santé
 - Tu ressens des symptômes que tu peux décrire quand on te pose les bonnes questions
 - Tu es coopératif mais réaliste dans tes réponses
-- Tu peux exprimer de l'inquiétude ou des émotions appropriées
+- Tu restes conversationnel, simple et non théâtral
 
 COMPORTEMENT :
 - Réponds aux questions médicales de manière cohérente
@@ -394,6 +415,10 @@ COMPORTEMENT :
 - Sois patient et poli avec le personnel soignant
 - Si on te demande des détails spécifiques, tu peux les fournir graduellement
 - Exprime tes préoccupations de santé de manière naturelle
+
+FORMAT:
+- Ne fais AUCUNE mise en scène: pas de didascalies, pas d'actions, pas de narration
+- N'utilise jamais de texte entre astérisques (ex: *...*)
 
 IMPORTANT : Ce prompt générique doit être remplacé par un prompt spécifique au scénario dans la base de données.`;
   }

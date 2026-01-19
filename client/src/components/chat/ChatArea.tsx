@@ -1,4 +1,6 @@
 import { useRef, useEffect } from "react";
+import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
+import { useWebRTCAudio } from '@/hooks/useWebRTCAudio';
 import { UserStatus, ChatExchange } from "@/lib/api";
 import ChatMessage from "./ChatMessage";
 
@@ -21,8 +23,25 @@ export default function ChatArea({
   isLoading,
   enableVoice = false
 }: ChatAreaProps) {
+  // WebRTC audio: roomId = 'chat-global' (ou à personnaliser selon besoin)
+  const { connected: audioConnected } = useWebRTCAudio({ roomId: 'chat-global', enabled: enableVoice });
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState("");
+
+  // Reconnaissance vocale continue pour interruption automatique
+  useSpeechRecognition({
+    enabled: enableVoice,
+    onResult: (text: string) => {
+      // Interrompre la synthèse vocale
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch {}
+      }
+      // TODO: envoyer un signal d'interruption au backend si possible
+      // Envoyer la nouvelle question automatiquement
+      if (text.trim()) onSendQuestion(text);
+    },
+    lang: 'fr-FR',
+  });
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -51,6 +70,16 @@ export default function ChatArea({
   return (
     <div className="flex-grow flex flex-col bg-neutral-50 p-4 md:p-6">
       {/* Messages container */}
+      {enableVoice && (
+        <div className="mb-2 flex items-center text-xs text-gray-500">
+          <span className={audioConnected ? 'text-green-600' : 'text-red-600'}>
+            ●
+          </span>
+          <span className="ml-2">
+            Audio {audioConnected ? 'connecté' : 'déconnecté'}
+          </span>
+        </div>
+      )}
       <div 
         ref={messagesContainerRef}
         className="flex-grow overflow-y-auto custom-scrollbar mb-4 space-y-6"

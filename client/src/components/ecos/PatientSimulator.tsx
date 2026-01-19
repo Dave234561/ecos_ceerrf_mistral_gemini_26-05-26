@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Clock, Send, User, Bot, X } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { getScenarioIdWithFallback, debugSessionData } from "@/utils/sessionUtils";
 import LoadingIndicator from "./LoadingIndicator";
@@ -27,6 +27,8 @@ interface Message {
 export default function PatientSimulator({ sessionId, email, onSessionEnd, onShowEvaluation }: PatientSimulatorProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentQuery, setCurrentQuery] = useState("");
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [isPatientWaiting, setIsPatientWaiting] = useState(false);
   const [sessionStartTime] = useState(new Date());
   const [remainingTime, setRemainingTime] = useState(25 * 60); // 25 minutes in seconds
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -38,12 +40,29 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
+  const suppressAudioRef = useRef(false);
+  const recognitionRef = useRef<any>(null);
+  const voiceEnabledRef = useRef(false);
+  const sendMessageRef = useRef<(text: string) => void>(() => {});
+  const lastVoiceSendAtRef = useRef(0);
+  const lastVoiceTranscriptRef = useRef('');
 
-  const decodeBase64ToInt16 = (b64: string): Int16Array => {
+  const decodeBase64ToArrayBuffer = (b64: string): ArrayBuffer => {
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new Int16Array(bytes.buffer);
+    return bytes.buffer;
+  };
+
+  const decodeBase64ToPcm16LE = (b64: string): Int16Array => {
+    const buf = decodeBase64ToArrayBuffer(b64);
+    const view = new DataView(buf);
+    const len = Math.floor(buf.byteLength / 2);
+    const out = new Int16Array(len);
+    for (let i = 0; i < len; i++) {
+      out[i] = view.getInt16(i * 2, true);
+    }
+    return out;
   };
 
   const unlockAudio = async () => {
@@ -62,19 +81,24 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     }
   };
 
-  const playPcm16 = async (pcm16: Int16Array, sampleRate = 24000) => {
-    if (!pcm16.length) return;
-    if (!audioCtxRef.current) {
+  const ensureAudioContext = async (sampleRate: number) => {
+    if (!audioCtxRef.current || audioCtxRef.current.sampleRate !== sampleRate) {
+      try { audioCtxRef.current?.close(); } catch {}
       audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
         sampleRate,
       });
       nextPlayTimeRef.current = audioCtxRef.current.currentTime;
     }
-
     const ctx = audioCtxRef.current;
     if (ctx.state === 'suspended') {
       try { await ctx.resume(); } catch {}
     }
+    return ctx;
+  };
+
+  const playPcm16 = async (pcm16: Int16Array, sampleRate: number) => {
+    if (!pcm16.length) return;
+    const ctx = await ensureAudioContext(sampleRate);
 
     const float32 = new Float32Array(pcm16.length);
     for (let i = 0; i < pcm16.length; i++) {
@@ -93,11 +117,45 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     nextPlayTimeRef.current = startAt + buffer.duration;
   };
 
+  const playEncodedAudio = async (b64: string) => {
+    const buf = decodeBase64ToArrayBuffer(b64);
+    const ctx = await ensureAudioContext(audioCtxRef.current?.sampleRate || 24000);
+    const audioBuffer = await ctx.decodeAudioData(buf.slice(0));
+
+    const src = ctx.createBufferSource();
+    src.buffer = audioBuffer;
+    src.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime, nextPlayTimeRef.current);
+    src.start(startAt);
+    nextPlayTimeRef.current = startAt + audioBuffer.duration;
+  };
+
+  const playAudioChunk = async (b64: string, mimeType?: string) => {
+    const mt = (mimeType || '').toLowerCase();
+    if (mt.includes('audio/pcm') || mt.includes('audio/l16')) {
+      const m = /rate=(\d+)/.exec(mt);
+      const rate = m ? parseInt(m[1], 10) : 24000;
+      const pcm16 = decodeBase64ToPcm16LE(b64);
+      await playPcm16(pcm16, Number.isFinite(rate) ? rate : 24000);
+      return;
+    }
+    await playEncodedAudio(b64);
+  };
+
+  const interruptAudioPlayback = () => {
+    suppressAudioRef.current = true;
+    try { window.speechSynthesis?.cancel?.(); } catch {}
+    try { audioCtxRef.current?.close(); } catch {}
+    audioCtxRef.current = null;
+    nextPlayTimeRef.current = 0;
+  };
+
   const sendSpeakText = (text: string) => {
     const dc = dcRef.current;
     if (!dc || dc.readyState !== 'open') return;
     if (!text || !text.trim()) return;
     try {
+      suppressAudioRef.current = false;
       dc.send(JSON.stringify({ type: 'speak', text }));
     } catch {}
   };
@@ -121,9 +179,22 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       let msg: any;
       try { msg = JSON.parse(ev.data); } catch { return; }
 
+      if (msg.type === 'interrupt') {
+        interruptAudioPlayback();
+        return;
+      }
+
+      if (msg.type === 'waiting') {
+        setIsPatientWaiting(true);
+        // Reset waiting status after 5 seconds or when audio starts
+        setTimeout(() => setIsPatientWaiting(false), 5000);
+        return;
+      }
+
       if (msg.type === 'audio' && typeof msg.data === 'string') {
-        const pcm16 = decodeBase64ToInt16(msg.data);
-        await playPcm16(pcm16, 24000);
+        if (suppressAudioRef.current) return;
+        setIsPatientWaiting(false);
+        await playAudioChunk(msg.data, msg.mimeType);
       }
     };
 
@@ -248,22 +319,22 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       debugSessionData({
         sessionId,
         session,
-        scenarioId: resolvedScenarioId
+        scenarioId: resolvedScenarioId ?? undefined
       });
       
       return apiRequest('POST', '/api/ecos/patient-simulator', {
         email,
         sessionId,
         query,
-        scenarioId: resolvedScenarioId
+        scenarioId: resolvedScenarioId ?? undefined
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data, query) => {
       // Add user message
       const userMessage: Message = {
         id: Date.now().toString() + '-user',
         role: 'user',
-        content: currentQuery,
+        content: query,
         timestamp: new Date().toISOString()
       };
 
@@ -282,6 +353,91 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       sendSpeakText(data.response);
     }
   });
+
+  useEffect(() => {
+    sendMessageRef.current = (text: string) => {
+      const clean = (text || '').trim();
+      if (!clean) return;
+      if (sendMessageMutation.isPending) return;
+
+      // Anti-rafale: SpeechRecognition peut renvoyer plusieurs "final" très rapprochés
+      const now = Date.now();
+      if (now - lastVoiceSendAtRef.current < 1500) return;
+      if (clean === lastVoiceTranscriptRef.current) return;
+
+      lastVoiceSendAtRef.current = now;
+      lastVoiceTranscriptRef.current = clean;
+      setIsPatientWaiting(false);
+      sendMessageMutation.mutate(clean);
+    };
+  }, [sendMessageMutation]);
+
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+
+    const supported = typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
+    if (!voiceEnabled || !supported) {
+      try {
+        recognitionRef.current?.onresult && (recognitionRef.current.onresult = null);
+        recognitionRef.current?.onerror && (recognitionRef.current.onerror = null);
+        recognitionRef.current?.onend && (recognitionRef.current.onend = null);
+        recognitionRef.current?.stop?.();
+      } catch {}
+      recognitionRef.current = null;
+      return;
+    }
+
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+
+    let stopRequested = false;
+
+    recognition.lang = 'fr-FR';
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: any) => {
+      if (!voiceEnabledRef.current) return;
+      const result = event?.results?.[event.results.length - 1];
+      const transcript = result?.[0]?.transcript?.trim?.() || '';
+      if (!transcript) return;
+
+      // Barge-in: couper immédiatement la lecture audio en cours
+      interruptAudioPlayback();
+
+      setCurrentQuery(transcript);
+      sendMessageRef.current(transcript);
+    };
+
+    recognition.onerror = () => {
+      // ignore
+    };
+
+    recognition.onend = () => {
+      if (stopRequested) return;
+      if (!voiceEnabledRef.current) return;
+      try { recognition.start(); } catch {}
+    };
+
+    try { recognition.start(); } catch {}
+
+    return () => {
+      stopRequested = true;
+      voiceEnabledRef.current = false;
+      try {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        recognition.stop();
+      } catch {}
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+    };
+  }, [voiceEnabled]);
 
   // End session mutation
   const endSessionMutation = useMutation({
@@ -487,6 +643,12 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
               message="Le patient réfléchit…"
               showQueueStatus={true}
             />
+            {isPatientWaiting && (
+              <div className="text-sm text-primary animate-pulse flex items-center justify-center mt-2">
+                <span className="material-icons text-sm mr-1">hourglass_empty</span>
+                Le patient vous attend...
+              </div>
+            )}
           </div>
 
           {/* Input Area */}
@@ -511,21 +673,15 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
                   alert('La reconnaissance vocale n\'est pas supportée sur ce navigateur.');
                   return;
                 }
-                // @ts-ignore
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                const recognition = new SpeechRecognition();
-                recognition.lang = 'fr-FR';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
-                recognition.onresult = (event) => {
-                  const transcript = event.results[0][0].transcript;
-                  setCurrentQuery(transcript);
-                };
-                recognition.onerror = () => {};
-                recognition.onend = () => {};
-                recognition.start();
+
+                unlockAudio();
+                setVoiceEnabled((v) => {
+                  const next = !v;
+                  if (!next) interruptAudioPlayback();
+                  return next;
+                });
               }}
-              className="p-2 rounded-full bg-neutral-100 text-neutral-700 hover:bg-primary/20 transition-colors"
+              className={`p-2 rounded-full transition-colors ${voiceEnabled ? 'bg-primary/20 text-primary' : 'bg-neutral-100 text-neutral-700 hover:bg-primary/20'}`}
               title="Activer le micro"
             >
               <span className="material-icons">mic</span>
@@ -545,6 +701,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       {/* Image Popup - Enlarged view */}
       <Dialog open={showImagePopup} onOpenChange={setShowImagePopup}>
         <DialogContent className="max-w-5xl w-full p-0 overflow-hidden">
+          <DialogTitle className="sr-only">Image agrandie de l'otite</DialogTitle>
           <div className="relative">
             <button
               onClick={() => setShowImagePopup(false)}

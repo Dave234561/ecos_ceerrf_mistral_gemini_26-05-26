@@ -61,6 +61,8 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
 
     const apiKey = process.env.GEMINI_API_KEY || '';
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview';
+    const voiceName = (process.env.GEMINI_VOICE as any) || 'Puck';
+    
     if (!apiKey) {
       ws.send(JSON.stringify({ type: 'error', message: 'Missing GEMINI_API_KEY on server.' }));
       ws.close();
@@ -77,13 +79,55 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
     const gemini = await GeminiLiveTTS.connect({
       apiKey,
       model,
-      systemInstruction: 'Tu es un patient virtuel. Réponds naturellement en français.',
-      onMessage: (message: any) => {
+      voiceName,
+      systemInstruction: 'Tu es un patient virtuel. Réponds naturellement en français. Si l\'utilisateur semble hésiter ou s\'arrêter au milieu d\'une phrase, utilise l\'outil wait_more pour lui indiquer que tu attends la suite.',
+      tools: [
+        {
+          function_declarations: [
+            {
+              name: 'wait_more',
+              description: 'Indique au système d\'attendre que l\'utilisateur finisse sa phrase. À utiliser si l\'utilisateur marque une pause mais semble avoir encore des choses à dire.',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  reason: {
+                    type: 'STRING',
+                    description: 'La raison pour laquelle on attend (optionnel).'
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      onMessage: async (message: any) => {
         try {
           if (message?.serverContent?.interrupted) {
             dataChannel?.send(JSON.stringify({ type: 'interrupt' }));
             return;
           }
+
+          // Handle Tool Calls
+          const toolCall = message?.toolCall;
+          if (toolCall?.functionCalls) {
+            const toolResponses: any[] = [];
+            for (const fc of toolCall.functionCalls) {
+              if (fc.name === 'wait_more') {
+                console.log('🤖 Bot called wait_more');
+                dataChannel?.send(JSON.stringify({ type: 'waiting', message: "Le patient vous attend..." }));
+                toolResponses.push({
+                  name: fc.name,
+                  id: fc.id,
+                  response: { success: true, status: 'waiting' }
+                });
+              }
+            }
+            if (toolResponses.length > 0) {
+              await gemini.sendToolResponse(toolResponses);
+            }
+            return;
+          }
+
           const parts = message?.serverContent?.modelTurn?.parts;
           if (!Array.isArray(parts)) return;
 

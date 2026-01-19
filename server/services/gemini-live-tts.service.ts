@@ -10,6 +10,8 @@ export class GeminiLiveTTS {
     apiKey: string;
     model: string;
     systemInstruction?: string;
+    tools?: any[];
+    voiceName?: 'Aoede' | 'Charon' | 'Fenrir' | 'Kore' | 'Puck';
     onMessage: LiveMessageHandler;
     onError?: (err: any) => void;
     onClose?: (ev: any) => void;
@@ -22,7 +24,15 @@ export class GeminiLiveTTS {
       model: params.model,
       config: {
         responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: params.voiceName || 'Puck', // 'Puck' est souvent une voix masculine claire, 'Kore' est féminine
+            },
+          },
+        },
         systemInstruction: params.systemInstruction,
+        tools: params.tools,
       },
       callbacks: {
         onopen: () => {},
@@ -35,6 +45,13 @@ export class GeminiLiveTTS {
     const tts = new GeminiLiveTTS();
     tts.session = session;
     return tts;
+  }
+
+  async sendToolResponse(toolOutputs: any[]): Promise<void> {
+    if (this.closed) return;
+    await this.session.sendClientContent({
+      tool_responses: toolOutputs
+    });
   }
 
   async speakText(text: string): Promise<void> {
