@@ -33,12 +33,17 @@ class FirebaseAdminService {
     }
 
     try {
+      console.log('📦 Loading firebase-admin modules...');
       this.firebaseAdmin = await import('firebase-admin/app');
       this.firebaseAuth = await import('firebase-admin/auth');
       console.log('✅ Firebase Admin modules loaded successfully');
-    } catch (error) {
-      console.error('❌ Failed to load Firebase Admin modules:', error);
-      throw new Error('Firebase Admin SDK not available in this environment');
+    } catch (error: any) {
+      console.error('❌ Failed to load Firebase Admin modules:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      throw new Error(`Firebase Admin SDK not available: ${error.message}`);
     }
   }
 
@@ -46,36 +51,46 @@ class FirebaseAdminService {
    * Initialize Firebase Admin SDK (lazy initialization)
    */
   private async initialize(): Promise<void> {
-    // Return existing initialization promise if in progress
     if (this.initializationPromise) {
       return this.initializationPromise;
     }
 
-    // Already initialized
     if (this.initialized) {
       return;
     }
 
-    // Start initialization
     this.initializationPromise = (async () => {
       try {
         console.log('🔥 Initializing Firebase Admin SDK...');
 
-        // Load Firebase modules dynamically
         await this.loadFirebaseModules();
 
         const projectId = process.env.FIREBASE_PROJECT_ID;
         const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+        let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
         if (!projectId || !clientEmail || !privateKey) {
-          throw new Error('Missing Firebase Admin SDK credentials in environment variables');
+          const missing = [];
+          if (!projectId) missing.push('FIREBASE_PROJECT_ID');
+          if (!clientEmail) missing.push('FIREBASE_CLIENT_EMAIL');
+          if (!privateKey) missing.push('FIREBASE_PRIVATE_KEY');
+          throw new Error(`Missing Firebase credentials: ${missing.join(', ')}`);
         }
 
-        // Replace escaped newlines in private key
+        // Handle private key formatting for Vercel
+        if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+          privateKey = privateKey.substring(1, privateKey.length - 1);
+        }
         const formattedPrivateKey = privateKey.replace(/\\n/g, '\n');
 
-        // Check if already initialized
+        console.log('🔧 Firebase Config:', {
+          projectId,
+          clientEmail,
+          privateKeyLength: privateKey.length,
+          hasNewLines: privateKey.includes('\n'),
+          hasEscapedNewLines: privateKey.includes('\\n')
+        });
+
         const existingApps = this.firebaseAdmin.getApps();
         if (existingApps.length === 0) {
           this.app = this.firebaseAdmin.initializeApp({
@@ -85,15 +100,19 @@ class FirebaseAdminService {
               privateKey: formattedPrivateKey,
             }),
           });
+          console.log('✅ Firebase app initialized');
         } else {
           this.app = existingApps[0];
+          console.log('✅ Using existing Firebase app');
         }
 
         this.initialized = true;
-        console.log('✅ Firebase Admin SDK initialized successfully');
-      } catch (error) {
-        console.error('❌ Failed to initialize Firebase Admin SDK:', error);
-        this.initializationPromise = null; // Allow retry
+      } catch (error: any) {
+        console.error('❌ Firebase Admin SDK initialization failed:', {
+          message: error.message,
+          stack: error.stack
+        });
+        this.initializationPromise = null;
         throw error;
       }
     })();
