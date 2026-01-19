@@ -93,11 +93,15 @@ export default async function handler(req, res) {
           console.log(`🔄 Trying strategy: ${strategy.name}`);
           console.log(`   URL: ${strategy.url}`);
           
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          
           const response = await fetch(strategy.url, {
             method: 'GET',
             headers: strategy.headers,
-            timeout: 10000 // 10 second timeout
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
 
           console.log(`   Response status: ${response.status} ${response.statusText}`);
 
