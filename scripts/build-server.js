@@ -68,6 +68,8 @@ async function buildServer() {
         'openai',
         '@pinecone-database/pinecone',
         '@supabase/supabase-js',
+        '@roamhq/wrtc',
+        'wrtc',
         'drizzle-orm',
         'express',
         'pg',
