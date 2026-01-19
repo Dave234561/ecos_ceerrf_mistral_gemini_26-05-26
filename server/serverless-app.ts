@@ -34,17 +34,17 @@ class ServerlessApplication {
   }
 
   private validateEnvironment(): { isValid: boolean; missing: string[] } {
-    const required = ['DATABASE_URL'];
-    const optional = ['OPENAI_API_KEY', 'PINECONE_API_KEY'];
+    const required = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY'];
     const missing = required.filter(v => !process.env[v]);
     
+    console.log('🔍 Environment Check:');
+    required.forEach(v => {
+      const isSet = !!process.env[v];
+      console.log(`  - ${v}: ${isSet ? '✅ Set' : '❌ MISSING'}`);
+    });
+
     if (missing.length > 0) {
       console.error(`❌ Missing critical environment variables: ${missing.join(', ')}`);
-    }
-    
-    const optionalMissing = optional.filter(v => !process.env[v]);
-    if (optionalMissing.length > 0) {
-      console.warn(`⚠️ Missing optional environment variables: ${optionalMissing.join(', ')}`);
     }
     
     return { isValid: missing.length === 0, missing };

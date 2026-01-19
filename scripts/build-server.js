@@ -74,10 +74,7 @@ async function buildServer() {
         'express',
         'pg',
         'postgres',
-        'ws',
-        'jsonwebtoken',
-        'jws',
-        'safe-buffer'
+        'ws'
       ],
       minify: false, // Keep readable for debugging
       treeShaking: true
