@@ -98,118 +98,128 @@ Retourne le résultat en format JSON structuré avec une clé "evaluation_criter
 
       console.log('🤖 Calling OpenAI API...');
       
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openaiApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ],
-          temperature: 0.3,
-          max_tokens: 1500
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error('❌ OpenAI API error:', response.status, errorData);
-        throw new Error(`OpenAI API error: ${response.status}`);
-      }
-
-      const openaiResponse = await response.json();
-      const criteriaText = openaiResponse.choices[0].message.content;
-
-      console.log('📝 Generated criteria text:', criteriaText.substring(0, 200) + '...');
-
-      // Try to parse as JSON, fallback to structured object if it fails
-      let criteria;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 55000); // 55s timeout for Vercel
+      
       try {
-        const parsedCriteria = JSON.parse(criteriaText);
-        // Ensure we have the right structure
-        if (parsedCriteria.evaluation_criteria) {
-          criteria = parsedCriteria;
-        } else if (Array.isArray(parsedCriteria)) {
-          criteria = { evaluation_criteria: parsedCriteria };
-        } else {
-          criteria = { evaluation_criteria: [parsedCriteria] };
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 1500
+          })
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorData = await response.text();
+          console.error('❌ OpenAI API error:', response.status, errorData);
+          throw new Error(`OpenAI API error: ${response.status}`);
         }
-      } catch (parseError) {
-        console.warn('⚠️ JSON parsing failed, creating structured fallback');
-        // If JSON parsing fails, create a structured object from the text
-        criteria = {
-          evaluation_criteria: [
-            {
-              name: "Communication",
-              description: "Évaluation des compétences de communication avec le patient",
-              maxScore: 4,
-              weight: 20,
-              indicators: {
-                "0": "Aucune communication effective",
-                "1": "Communication minimale",
-                "2": "Communication acceptable",
-                "3": "Bonne communication",
-                "4": "Communication excellente"
+
+        const openaiResponse = await response.json();
+        const criteriaText = openaiResponse.choices[0].message.content;
+
+        console.log('📝 Generated criteria text:', criteriaText.substring(0, 200) + '...');
+
+        // Try to parse as JSON, fallback to structured object if it fails
+        let criteria;
+        try {
+          const parsedCriteria = JSON.parse(criteriaText);
+          // Ensure we have the right structure
+          if (parsedCriteria.evaluation_criteria) {
+            criteria = parsedCriteria;
+          } else if (Array.isArray(parsedCriteria)) {
+            criteria = { evaluation_criteria: parsedCriteria };
+          } else {
+            criteria = { evaluation_criteria: [parsedCriteria] };
+          }
+        } catch (parseError) {
+          console.warn('⚠️ JSON parsing failed, creating structured fallback');
+          // If JSON parsing fails, create a structured object from the text
+          criteria = {
+            evaluation_criteria: [
+              {
+                name: "Communication",
+                description: "Évaluation des compétences de communication avec le patient",
+                maxScore: 4,
+                weight: 20,
+                indicators: {
+                  "0": "Aucune communication effective",
+                  "1": "Communication minimale",
+                  "2": "Communication acceptable",
+                  "3": "Bonne communication",
+                  "4": "Communication excellente"
+                }
+              },
+              {
+                name: "Anamnèse",
+                description: "Capacité à recueillir les informations pertinentes sur l'histoire du patient",
+                maxScore: 4,
+                weight: 25,
+                indicators: {
+                  "0": "Aucune question pertinente posée",
+                  "1": "Questions de base posées",
+                  "2": "Anamnèse correcte mais incomplète",
+                  "3": "Anamnèse complète et structurée",
+                  "4": "Anamnèse exhaustive et ciblée"
+                }
+              },
+              {
+                name: "Raisonnement clinique",
+                description: "Capacité d'analyse et de raisonnement diagnostique",
+                maxScore: 4,
+                weight: 30,
+                indicators: {
+                  "0": "Aucun raisonnement apparent",
+                  "1": "Raisonnement élémentaire",
+                  "2": "Raisonnement acceptable",
+                  "3": "Bon raisonnement clinique",
+                  "4": "Raisonnement clinique excellent"
+                }
+              },
+              {
+                name: "Prise en charge",
+                description: "Propositions de prise en charge appropriées",
+                maxScore: 4,
+                weight: 25,
+                indicators: {
+                  "0": "Aucune prise en charge proposée",
+                  "1": "Prise en charge inadéquate",
+                  "2": "Prise en charge partielle",
+                  "3": "Prise en charge appropriée",
+                  "4": "Prise en charge optimale"
+                }
               }
-            },
-            {
-              name: "Anamnèse",
-              description: "Capacité à recueillir les informations pertinentes sur l'histoire du patient",
-              maxScore: 4,
-              weight: 25,
-              indicators: {
-                "0": "Aucune question pertinente posée",
-                "1": "Questions de base posées",
-                "2": "Anamnèse correcte mais incomplète",
-                "3": "Anamnèse complète et structurée",
-                "4": "Anamnèse exhaustive et ciblée"
-              }
-            },
-            {
-              name: "Raisonnement clinique",
-              description: "Capacité d'analyse et de raisonnement diagnostique",
-              maxScore: 4,
-              weight: 30,
-              indicators: {
-                "0": "Aucun raisonnement apparent",
-                "1": "Raisonnement élémentaire",
-                "2": "Raisonnement acceptable",
-                "3": "Bon raisonnement clinique",
-                "4": "Raisonnement clinique excellent"
-              }
-            },
-            {
-              name: "Prise en charge",
-              description: "Propositions de prise en charge appropriées",
-              maxScore: 4,
-              weight: 25,
-              indicators: {
-                "0": "Aucune prise en charge proposée",
-                "1": "Prise en charge inadéquate",
-                "2": "Prise en charge partielle",
-                "3": "Prise en charge appropriée",
-                "4": "Prise en charge optimale"
-              }
-            }
-          ],
-          generatedText: criteriaText
-        };
+            ],
+            generatedText: criteriaText
+          };
+        }
+
+        const responseTime = Date.now() - startTime;
+        console.log(`✅ Criteria generated successfully in ${responseTime}ms`);
+
+        res.status(200).json({ 
+          message: "Critères d'évaluation générés avec succès",
+          criteria,
+          responseTime,
+          timestamp: new Date().toISOString(),
+          source: 'direct-openai-api'
+        });
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      const responseTime = Date.now() - startTime;
-      console.log(`✅ Criteria generated successfully in ${responseTime}ms`);
-
-      res.status(200).json({ 
-        message: "Critères d'évaluation générés avec succès",
-        criteria,
-        responseTime,
-        timestamp: new Date().toISOString(),
-        source: 'direct-openai-api'
-      });
 
     } catch (openaiError) {
       console.error('❌ OpenAI error:', openaiError);
