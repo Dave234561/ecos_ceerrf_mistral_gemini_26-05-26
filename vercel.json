@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "_comment": "Forced redeploy 2026-01-20T10:30:00Z",
   "buildCommand": "npm run build",
   "outputDirectory": "dist/public",
   "framework": null,
