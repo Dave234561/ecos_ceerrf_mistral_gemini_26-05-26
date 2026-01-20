@@ -66,6 +66,8 @@ async function buildServer() {
         '@neondatabase/serverless',
         'firebase-admin',
         'openai',
+        'jsonwebtoken',
+        'fs-extra',
         '@pinecone-database/pinecone',
         '@supabase/supabase-js',
         '@roamhq/wrtc',
