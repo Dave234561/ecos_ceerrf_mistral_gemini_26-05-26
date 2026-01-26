@@ -36,21 +36,12 @@ print_error() {
 print_step "Step 1: Pre-deployment Validation"
 
 echo "🔍 Validating environment..."
-node scripts/validate-env.js
-if [ $? -eq 0 ]; then
-    print_success "Environment validation passed"
-else
-    print_error "Environment validation failed"
-    exit 1
-fi
+node scripts/validate-env.js || { print_error "Environment validation failed"; exit 1; }
 
 echo "🔧 Running TypeScript checks..."
-npm run check
-if [ $? -eq 0 ]; then
-    print_success "TypeScript check passed"
-else
-    print_warning "TypeScript check failed - will use fallback endpoints"
-fi
+# Don't exit on type check failure, we use fallbacks
+npm run check || print_warning "TypeScript check failed - will use fallback endpoints"
+
 
 # Step 2: Build process
 print_step "Step 2: Build Process"
