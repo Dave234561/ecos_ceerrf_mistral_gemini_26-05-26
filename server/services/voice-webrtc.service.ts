@@ -166,8 +166,15 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
         const msg = typeof ev.data === 'string' ? safeJsonParse(ev.data) : null;
         if (!msg) return;
 
+        // Handle text-to-speech (fallback/existing functionality)
         if (msg.type === 'speak' && typeof msg.text === 'string') {
           await gemini.speakText(msg.text);
+        }
+
+        // Handle direct audio input from client microphone
+        if (msg.type === 'audio' && typeof msg.data === 'string') {
+          const mimeType = msg.mimeType || 'audio/pcm;rate=16000';
+          await gemini.sendAudio(msg.data, mimeType);
         }
       };
 

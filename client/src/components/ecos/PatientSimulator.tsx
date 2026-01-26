@@ -46,6 +46,11 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
   const sendMessageRef = useRef<(text: string) => void>(() => {});
   const lastVoiceSendAtRef = useRef(0);
   const lastVoiceTranscriptRef = useRef('');
+  
+  // Direct audio streaming refs
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
 
   const decodeBase64ToArrayBuffer = (b64: string): ArrayBuffer => {
     const binary = atob(b64);
@@ -372,70 +377,126 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     };
   }, [sendMessageMutation]);
 
+  // Direct audio streaming to Gemini Live
   useEffect(() => {
     voiceEnabledRef.current = voiceEnabled;
 
-    const supported = typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
-    if (!voiceEnabled || !supported) {
-      try {
-        recognitionRef.current?.onresult && (recognitionRef.current.onresult = null);
-        recognitionRef.current?.onerror && (recognitionRef.current.onerror = null);
-        recognitionRef.current?.onend && (recognitionRef.current.onend = null);
-        recognitionRef.current?.stop?.();
-      } catch {}
-      recognitionRef.current = null;
+    if (!voiceEnabled) {
+      // Stop microphone streaming
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+        micStreamRef.current = null;
+      }
+      if (micAudioCtxRef.current) {
+        try { micAudioCtxRef.current.close(); } catch {}
+        micAudioCtxRef.current = null;
+      }
+      audioWorkletRef.current = null;
+      console.log('🎤 [DirectAudio] Stopped microphone streaming');
       return;
     }
 
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
+    let stopped = false;
 
-    let stopRequested = false;
+    const startMicrophoneStreaming = async () => {
+      try {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            sampleRate: 16000,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          }
+        });
+        
+        if (stopped) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
 
-    recognition.lang = 'fr-FR';
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+        micStreamRef.current = stream;
+        console.log('🎤 [DirectAudio] Microphone access granted');
 
-    recognition.onresult = (event: any) => {
-      if (!voiceEnabledRef.current) return;
-      const result = event?.results?.[event.results.length - 1];
-      const transcript = result?.[0]?.transcript?.trim?.() || '';
-      if (!transcript) return;
+        // Create AudioContext for processing at 16kHz (Gemini expects this)
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 16000,
+        });
+        micAudioCtxRef.current = audioCtx;
 
-      // Barge-in: couper immédiatement la lecture audio en cours
-      interruptAudioPlayback();
+        const source = audioCtx.createMediaStreamSource(stream);
+        
+        // Use ScriptProcessorNode (deprecated but widely supported) for audio processing
+        // Buffer size of 4096 samples at 16kHz = ~256ms chunks
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        
+        processor.onaudioprocess = (event) => {
+          if (!voiceEnabledRef.current || stopped) return;
+          
+          const dc = dcRef.current;
+          if (!dc || dc.readyState !== 'open') return;
 
-      setCurrentQuery(transcript);
-      sendMessageRef.current(transcript);
+          const inputData = event.inputBuffer.getChannelData(0);
+          
+          // Convert Float32 (-1 to 1) to Int16 PCM
+          const pcm16 = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+
+          // Convert to base64
+          const uint8 = new Uint8Array(pcm16.buffer);
+          let binary = '';
+          for (let i = 0; i < uint8.length; i++) {
+            binary += String.fromCharCode(uint8[i]);
+          }
+          const base64 = btoa(binary);
+
+          // Send audio chunk to server via DataChannel
+          try {
+            dc.send(JSON.stringify({
+              type: 'audio',
+              data: base64,
+              mimeType: 'audio/pcm;rate=16000'
+            }));
+          } catch (e) {
+            console.error('🎤 [DirectAudio] Failed to send audio chunk:', e);
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+        
+        console.log('🎤 [DirectAudio] Started streaming audio to Gemini Live');
+
+      } catch (err: any) {
+        console.error('🎤 [DirectAudio] Failed to start microphone:', err);
+        if (err.name === 'NotAllowedError') {
+          alert('Accès au microphone refusé. Veuillez autoriser l\'accès dans les paramètres de votre navigateur.');
+        } else if (err.name === 'NotFoundError') {
+          alert('Aucun microphone trouvé. Vérifiez que votre microphone est branché.');
+        } else {
+          alert(`Erreur microphone: ${err.message}`);
+        }
+        setVoiceEnabled(false);
+      }
     };
 
-    recognition.onerror = () => {
-      // ignore
-    };
-
-    recognition.onend = () => {
-      if (stopRequested) return;
-      if (!voiceEnabledRef.current) return;
-      try { recognition.start(); } catch {}
-    };
-
-    try { recognition.start(); } catch {}
+    startMicrophoneStreaming();
 
     return () => {
-      stopRequested = true;
+      stopped = true;
       voiceEnabledRef.current = false;
-      try {
-        recognition.onresult = null;
-        recognition.onerror = null;
-        recognition.onend = null;
-        recognition.stop();
-      } catch {}
-      if (recognitionRef.current === recognition) {
-        recognitionRef.current = null;
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+        micStreamRef.current = null;
       }
+      if (micAudioCtxRef.current) {
+        try { micAudioCtxRef.current.close(); } catch {}
+        micAudioCtxRef.current = null;
+      }
+      audioWorkletRef.current = null;
     };
   }, [voiceEnabled]);
 
@@ -669,8 +730,8 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
             <button
               type="button"
               onClick={() => {
-                if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-                  alert('La reconnaissance vocale n\'est pas supportée sur ce navigateur.');
+                if (!navigator.mediaDevices?.getUserMedia) {
+                  alert('L\'accès au microphone n\'est pas supporté sur ce navigateur.');
                   return;
                 }
 

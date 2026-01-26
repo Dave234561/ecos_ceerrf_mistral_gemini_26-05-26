@@ -65,6 +65,23 @@ export class GeminiLiveTTS {
     });
   }
 
+  /**
+   * Send raw audio data to Gemini Live for real-time speech recognition and response.
+   * @param audioBase64 - Base64 encoded PCM audio data
+   * @param mimeType - Audio MIME type (default: "audio/pcm;rate=16000")
+   */
+  async sendAudio(audioBase64: string, mimeType: string = 'audio/pcm;rate=16000'): Promise<void> {
+    if (this.closed) return;
+    if (!audioBase64) return;
+
+    await this.session.sendRealtimeInput({
+      audio: {
+        data: audioBase64,
+        mimeType,
+      },
+    });
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
