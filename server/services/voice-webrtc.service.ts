@@ -83,6 +83,12 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
 
     let dataChannel: any = null;
 
+    console.log(`🔧 Connecting to Gemini Live with config:`, {
+      model,
+      voiceName,
+      requestedVoiceType
+    });
+
     // Bridge to Gemini Live (audio output). We forward audio chunks to the client.
     const gemini = await GeminiLiveTTS.connect({
       apiKey,
@@ -150,12 +156,23 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
           }
 
           const parts = message?.serverContent?.modelTurn?.parts;
-          if (!Array.isArray(parts)) return;
+          if (!Array.isArray(parts)) {
+            console.log('🔍 No parts found in message:', JSON.stringify(message, null, 2));
+            return;
+          }
 
+          console.log(`🎵 Processing ${parts.length} parts from Gemini Live (voice: ${voiceName})`);
+          
           for (const part of parts) {
             const b64 = part?.inlineData?.data;
             const mimeType = part?.inlineData?.mimeType;
-            if (!b64) continue;
+            
+            if (!b64) {
+              console.log('🔍 Part without audio data:', part);
+              continue;
+            }
+            
+            console.log(`🎵 Sending audio chunk: ${mimeType}, size: ${b64.length} chars`);
             dataChannel?.send(JSON.stringify({ type: 'audio', data: b64, mimeType }));
           }
         } catch (err: any) {

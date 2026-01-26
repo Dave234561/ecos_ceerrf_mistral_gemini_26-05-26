@@ -20,6 +20,9 @@ export class GeminiLiveTTS {
     const { GoogleGenAI, Modality } = require('@google/genai');
     const ai = new GoogleGenAI({ apiKey: params.apiKey });
 
+    const finalVoiceName = params.voiceName || 'Puck';
+    console.log(`🎤 Initializing Gemini Live with voice: ${finalVoiceName} (requested: ${params.voiceName})`);
+
     const session = await ai.live.connect({
       model: params.model,
       config: {
@@ -27,7 +30,7 @@ export class GeminiLiveTTS {
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: params.voiceName || 'Puck',
+              voiceName: finalVoiceName,
             },
           },
         },
