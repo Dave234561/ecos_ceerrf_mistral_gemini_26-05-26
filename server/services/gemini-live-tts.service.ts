@@ -34,22 +34,36 @@ export class GeminiLiveTTS {
         systemInstruction: params.systemInstruction,
         tools: params.tools,
       },
-      callbacks: {
-        onopen: () => {},
-        onmessage: params.onMessage,
-        onerror: params.onError || (() => {}),
-        onclose: params.onClose || (() => {}),
-      },
     });
 
     const tts = new GeminiLiveTTS();
     tts.session = session;
+
+    // Register callbacks after connecting
+    session.on('open', () => {
+      console.log(' Gemini Live connection opened');
+    });
+
+    session.on('message', (message: any) => {
+      params.onMessage(message);
+    });
+
+    session.on('error', (err: any) => {
+      console.error(' Gemini Live error:', err);
+      if (params.onError) params.onError(err);
+    });
+
+    session.on('close', (ev: any) => {
+      console.log(' Gemini Live connection closed');
+      if (params.onClose) params.onClose(ev);
+    });
+
     return tts;
   }
 
   async sendToolResponse(toolOutputs: any[]): Promise<void> {
     if (this.closed) return;
-    await this.session.sendClientContent({
+    await this.session.send({
       tool_responses: toolOutputs
     });
   }
@@ -58,26 +72,27 @@ export class GeminiLiveTTS {
     if (this.closed) return;
     if (!text || !text.trim()) return;
 
-    // Live API expects turns + turnComplete
-    await this.session.sendClientContent({
-      turns: text,
-      turnComplete: true,
+    await this.session.send({
+      text: text,
+      end_of_turn: true,
     });
   }
 
   /**
    * Send raw audio data to Gemini Live for real-time speech recognition and response.
-   * @param audioBase64 - Base64 encoded PCM audio data
-   * @param mimeType - Audio MIME type (default: "audio/pcm;rate=16000")
    */
   async sendAudio(audioBase64: string, mimeType: string = 'audio/pcm;rate=16000'): Promise<void> {
     if (this.closed) return;
     if (!audioBase64) return;
 
-    await this.session.sendRealtimeInput({
-      audio: {
-        data: audioBase64,
-        mimeType,
+    await this.session.send({
+      realtime_input: {
+        media_chunks: [
+          {
+            data: audioBase64,
+            mime_type: mimeType,
+          },
+        ],
       },
     });
   }
