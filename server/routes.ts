@@ -2302,6 +2302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               title: scenario.title,
               description: scenario.description,
               patient_prompt: scenario.patient_prompt,
+              voice_type: scenario.voice_type,
               evaluation_criteria: cleanEvaluationCriteria(scenario.evaluation_criteria)
             }
           },

@@ -20,9 +20,11 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
   // Attach WS upgrade
   httpServer.on('upgrade', (req, socket, head) => {
     try {
-      const url = new URL(req.url || '', 'http://localhost');
+      const url = new URL(req.url || '', `http://${req.headers.host}`);
       if (url.pathname !== '/api/voice/webrtc') return;
       wss.handleUpgrade(req, socket, head, (ws) => {
+        // Pass the request to the connection handler to access query params
+        (ws as any).upgradeReq = req;
         wss.emit('connection', ws, req);
       });
     } catch (e) {
@@ -30,7 +32,14 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
     }
   });
 
-  wss.on('connection', async (ws) => {
+  wss.on('connection', async (ws, req) => {
+    // Extract voiceType from query params
+    const url = new URL(req.url || '', `http://${req.headers.host}`);
+    const requestedVoiceType = url.searchParams.get('voiceType') || 'male';
+    const voiceName = requestedVoiceType === 'female' ? 'Kore' : 'Puck';
+
+    console.log(`🎙️ New Voice WebRTC connection. VoiceType: ${requestedVoiceType}, Gemini Voice: ${voiceName}`);
+
     // Lazy imports: do not crash server if deps are missing.
     let wrtc: any = null;
     try {
@@ -60,8 +69,7 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
     }
 
     const apiKey = process.env.GEMINI_API_KEY || '';
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-native-audio-preview';
-    const voiceName = (process.env.GEMINI_VOICE as any) || 'Puck';
+    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp'; // Use stable flash model if available
     
     if (!apiKey) {
       ws.send(JSON.stringify({ type: 'error', message: 'Missing GEMINI_API_KEY on server.' }));
@@ -105,6 +113,19 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
           if (message?.serverContent?.interrupted) {
             dataChannel?.send(JSON.stringify({ type: 'interrupt' }));
             return;
+          }
+
+          // Handle User Transcription (STT) from Gemini
+          const userTranscription = message?.serverContent?.userTurn?.parts?.[0]?.text;
+          if (userTranscription) {
+            console.log('🗣️ User transcript from Gemini:', userTranscription);
+            dataChannel?.send(JSON.stringify({ type: 'transcript', text: userTranscription, role: 'user' }));
+          }
+
+          // Handle Model Transcription
+          const modelTranscription = message?.serverContent?.modelTurn?.parts?.[0]?.text;
+          if (modelTranscription) {
+            dataChannel?.send(JSON.stringify({ type: 'transcript', text: modelTranscription, role: 'assistant' }));
           }
 
           // Handle Tool Calls

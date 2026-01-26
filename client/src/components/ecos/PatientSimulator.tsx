@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { getScenarioIdWithFallback, debugSessionData } from "@/utils/sessionUtils";
 import LoadingIndicator from "./LoadingIndicator";
+import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 
 interface PatientSimulatorProps {
   sessionId: string;
@@ -167,7 +168,8 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
 
   useEffect(() => {
     // Connect WebRTC once per simulator session
-    const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/voice/webrtc`;
+    const voiceType = session?.scenario?.voiceType || session?.scenario?.voice_type || 'male';
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/voice/webrtc?voiceType=${voiceType}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -200,6 +202,53 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
         if (suppressAudioRef.current) return;
         setIsPatientWaiting(false);
         await playAudioChunk(msg.data, msg.mimeType);
+      }
+
+      if (msg.type === 'transcript') {
+        console.log(`📝 Received transcript (${msg.role}): ${msg.text}`);
+        
+        // Handle user transcript (what the student said)
+        if (msg.role === 'user') {
+          // We only add it if it's not empty and different from the last one to avoid duplicates
+          const cleanText = msg.text.trim();
+          if (cleanText && cleanText !== lastVoiceTranscriptRef.current) {
+            lastVoiceTranscriptRef.current = cleanText;
+            
+            setMessages(prev => {
+              // Avoid adding duplicate user messages that might come from both STT and Gemini transcript
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg && lastMsg.role === 'user' && lastMsg.content === cleanText) return prev;
+              
+              return [...prev, {
+                id: Date.now().toString() + '-user-voice',
+                role: 'user',
+                content: cleanText,
+                timestamp: new Date().toISOString()
+              }];
+            });
+          }
+        }
+        
+        // Handle assistant transcript (what the patient said)
+        if (msg.role === 'assistant') {
+          const cleanText = msg.text.trim();
+          if (cleanText) {
+            setMessages(prev => {
+              // If the last message was a user message, we add this as a new assistant response
+              // If the last message was already an assistant message, we might want to append or replace
+              // For now, let's just add it if it's different from the last content
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === cleanText) return prev;
+              
+              return [...prev, {
+                id: Date.now().toString() + '-assistant-voice',
+                role: 'assistant',
+                content: cleanText,
+                timestamp: new Date().toISOString()
+              }];
+            });
+          }
+        }
       }
     };
 
@@ -249,7 +298,35 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     ws.onclose = cleanup;
 
     return cleanup;
-  }, [sessionId]);
+  }, [sessionId, session?.scenario?.id, session?.scenario?.voice_type, session?.scenario?.voiceType]);
+
+  // Immediate STT feedback for user
+  useSpeechRecognition({
+    enabled: voiceEnabled,
+    onResult: (text: string) => {
+      const clean = text.trim();
+      if (!clean) return;
+      
+      console.log('🎙️ Browser STT result:', clean);
+      
+      // Deduplicate with last message
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'user' && (last.content === clean || last.content.includes(clean))) return prev;
+        
+        return [...prev, {
+          id: Date.now().toString() + '-user-stt',
+          role: 'user',
+          content: clean,
+          timestamp: new Date().toISOString()
+        }];
+      });
+      
+      // Interrupt patient if speaking
+      interruptAudioPlayback();
+    },
+    lang: 'fr-FR',
+  });
 
   // Countdown timer effect
   useEffect(() => {

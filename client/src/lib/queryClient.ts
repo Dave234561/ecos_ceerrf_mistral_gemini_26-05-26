@@ -59,7 +59,7 @@ export async function apiRequest(
         ...defaultHeaders,
         ...authHeaders,  // Add Firebase token automatically
         ...(fetchOptions?.headers || {})  // Allow override if needed
-      },
+      } as any,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
       ...fetchOptions,
@@ -91,7 +91,11 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
+    const authHeaders = await getAuthHeaders();
     const res = await fetch(queryKey[0] as string, {
+      headers: {
+        ...authHeaders,
+      },
       credentials: "include",
     });
 
