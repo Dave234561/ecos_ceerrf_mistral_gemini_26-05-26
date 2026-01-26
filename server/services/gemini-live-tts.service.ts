@@ -27,44 +27,42 @@ export class GeminiLiveTTS {
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: {
-              voiceName: params.voiceName || 'Puck', // 'Puck' est souvent une voix masculine claire, 'Kore' est féminine
+              voiceName: params.voiceName || 'Puck',
             },
           },
         },
         systemInstruction: params.systemInstruction,
         tools: params.tools,
       },
+      callbacks: {
+        onopen: () => {
+          console.log('✅ Gemini Live connection opened');
+        },
+        onmessage: (message: any) => {
+          params.onMessage(message);
+        },
+        onerror: (err: any) => {
+          console.error('❌ Gemini Live error:', err);
+          if (params.onError) params.onError(err);
+        },
+        onclose: (ev: any) => {
+          console.log('ℹ️ Gemini Live connection closed');
+          if (params.onClose) params.onClose(ev);
+        },
+      },
     });
 
     const tts = new GeminiLiveTTS();
     tts.session = session;
-
-    // Register callbacks after connecting
-    session.on('open', () => {
-      console.log(' Gemini Live connection opened');
-    });
-
-    session.on('message', (message: any) => {
-      params.onMessage(message);
-    });
-
-    session.on('error', (err: any) => {
-      console.error(' Gemini Live error:', err);
-      if (params.onError) params.onError(err);
-    });
-
-    session.on('close', (ev: any) => {
-      console.log(' Gemini Live connection closed');
-      if (params.onClose) params.onClose(ev);
-    });
-
     return tts;
   }
 
   async sendToolResponse(toolOutputs: any[]): Promise<void> {
     if (this.closed) return;
     await this.session.send({
-      tool_responses: toolOutputs
+      toolResponse: {
+        functionResponses: toolOutputs
+      }
     });
   }
 
@@ -73,26 +71,28 @@ export class GeminiLiveTTS {
     if (!text || !text.trim()) return;
 
     await this.session.send({
-      text: text,
-      end_of_turn: true,
+      clientContent: {
+        turns: [{
+          role: 'user',
+          parts: [{ text: text }]
+        }],
+        turnComplete: true
+      }
     });
   }
 
   /**
    * Send raw audio data to Gemini Live for real-time speech recognition and response.
+   * Based on official documentation: session.sendRealtimeInput({ audio: { data, mimeType } })
    */
   async sendAudio(audioBase64: string, mimeType: string = 'audio/pcm;rate=16000'): Promise<void> {
     if (this.closed) return;
     if (!audioBase64) return;
 
-    await this.session.send({
-      realtime_input: {
-        media_chunks: [
-          {
-            data: audioBase64,
-            mime_type: mimeType,
-          },
-        ],
+    await this.session.sendRealtimeInput({
+      audio: {
+        data: audioBase64,
+        mimeType: mimeType,
       },
     });
   }
