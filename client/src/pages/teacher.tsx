@@ -38,6 +38,7 @@ function ScenarioCreationForm({ email, onSuccess, editingScenario, onCancelEdit 
     patientPrompt: editingScenario?.patient_prompt || editingScenario?.patientPrompt || "",
     evaluationCriteria: (editingScenario?.evaluation_criteria || editingScenario?.evaluationCriteria) ? JSON.stringify(editingScenario.evaluation_criteria || editingScenario.evaluationCriteria, null, 2) : "",
     pineconeIndex: editingScenario?.pinecone_index || editingScenario?.pineconeIndex || "",
+    voiceType: editingScenario?.voice_type || editingScenario?.voiceType || "male",
     criteriaText: editingScenario?.criteriaText || ""
   });
 
@@ -50,6 +51,7 @@ function ScenarioCreationForm({ email, onSuccess, editingScenario, onCancelEdit 
         patientPrompt: editingScenario.patient_prompt || editingScenario.patientPrompt || "",
         evaluationCriteria: (editingScenario.evaluation_criteria || editingScenario.evaluationCriteria) ? JSON.stringify(editingScenario.evaluation_criteria || editingScenario.evaluationCriteria, null, 2) : "",
         pineconeIndex: editingScenario.pinecone_index || editingScenario.pineconeIndex || "",
+        voiceType: editingScenario.voice_type || editingScenario.voiceType || "male",
         criteriaText: editingScenario?.criteriaText || ""
       });
     }
@@ -107,7 +109,7 @@ function ScenarioCreationForm({ email, onSuccess, editingScenario, onCancelEdit 
     onSuccess: (response) => {
       console.log(`Scenario ${editingScenario ? 'updated' : 'created'} successfully:`, response);
       queryClient.invalidateQueries({ queryKey: ['dashboard-data'] });
-      setFormData({ title: "", description: "", patientPrompt: "", evaluationCriteria: "", pineconeIndex: "", criteriaText: "" });
+      setFormData({ title: "", description: "", patientPrompt: "", evaluationCriteria: "", pineconeIndex: "", voiceType: "male", criteriaText: "" });
       if (onCancelEdit) onCancelEdit();
       onSuccess();
       alert(`Scénario ${editingScenario ? 'modifié' : 'créé'} avec succès !`);
@@ -198,12 +200,13 @@ function ScenarioCreationForm({ email, onSuccess, editingScenario, onCancelEdit 
       description: formData.description,
       patientPrompt: formData.patientPrompt || undefined,
       evaluationCriteria: criteriaString,
-      pineconeIndex: formData.pineconeIndex || undefined
+      pineconeIndex: formData.pineconeIndex || undefined,
+      voiceType: formData.voiceType
     });
   };
 
   const handleCancel = () => {
-    setFormData({ title: "", description: "", patientPrompt: "", evaluationCriteria: "", pineconeIndex: "", criteriaText: "" });
+    setFormData({ title: "", description: "", patientPrompt: "", evaluationCriteria: "", pineconeIndex: "", voiceType: "male", criteriaText: "" });
     if (onCancelEdit) onCancelEdit();
   };
 
@@ -240,6 +243,25 @@ function ScenarioCreationForm({ email, onSuccess, editingScenario, onCancelEdit 
         />
         <p className="text-xs text-gray-500 mt-1">
           Décrivez précisément la situation clinique que l'étudiant devra gérer.
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="voiceType">Voix du Patient *</Label>
+        <Select 
+          value={formData.voiceType} 
+          onValueChange={(value) => setFormData(prev => ({ ...prev, voiceType: value }))}
+        >
+          <SelectTrigger className="mt-1">
+            <SelectValue placeholder="Sélectionner le type de voix" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="male">Masculine</SelectItem>
+            <SelectItem value="female">Féminine</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-gray-500 mt-1">
+          Cette voix sera utilisée pour la synthèse vocale lors de la simulation.
         </p>
       </div>
 

@@ -82,6 +82,7 @@ export const ecosScenarios = pgTable("ecos_scenarios", {
   evaluationCriteria: jsonb("evaluation_criteria").notNull(),
   pineconeIndex: varchar("pinecone_index", { length: 255 }),
   imageUrl: varchar("image_url", { length: 500 }),
+  voiceType: varchar("voice_type", { length: 20 }).default("male"),
   createdBy: varchar("created_by", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -159,6 +160,7 @@ export const insertEcosScenarioSchema = createInsertSchema(ecosScenarios).pick({
   evaluationCriteria: true,
   pineconeIndex: true,
   imageUrl: true,
+  voiceType: true,
   createdBy: true,
 });
 

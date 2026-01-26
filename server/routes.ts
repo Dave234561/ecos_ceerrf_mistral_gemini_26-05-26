@@ -438,7 +438,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ecos/scenarios", requireFirebaseAdmin, ecosSessionRateLimit.middleware(), validateContentType(), validateRequestSize(), async (req: FirebaseAuthRequest, res: Response) => {
     try {
       // SECURITY: Admin access verified by requireFirebaseAdmin middleware
-      const { title, description, patientPrompt, evaluationCriteria, pineconeIndex } = req.body;
+      const { title, description, patientPrompt, evaluationCriteria, pineconeIndex, voiceType } = req.body;
 
       if (!title || !description) {
         return res.status(400).json({
@@ -481,6 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         description,
         patientPrompt: patientPrompt || null,
         evaluationCriteria: parsedCriteria,
+        voiceType: voiceType || 'male',
         imageUrl: null,
         createdBy: req.firebaseUser!.email
       });
@@ -506,7 +507,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // SECURITY: Admin access verified by requireFirebaseAdmin middleware
       const { id } = req.params;
-      const { title, description, patientPrompt, evaluationCriteria, pineconeIndex } = req.body;
+      const { title, description, patientPrompt, evaluationCriteria, pineconeIndex, voiceType } = req.body;
 
       console.log(`🔄 Updating scenario ${id} for admin: ${req.firebaseUser?.email}`);
 
@@ -542,7 +543,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         description,
         patientPrompt: patientPrompt || null,
         evaluationCriteria: parsedCriteria,
-        pineconeIndex: pineconeIndex || null
+        pineconeIndex: pineconeIndex || null,
+        voiceType: voiceType || undefined
       });
 
       res.status(200).json({

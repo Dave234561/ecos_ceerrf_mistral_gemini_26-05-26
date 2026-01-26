@@ -219,6 +219,7 @@ export class UnifiedDatabaseService {
           patient_prompt,
           evaluation_criteria,
           image_url,
+          voice_type,
           created_by,
           created_at,
           updated_at
@@ -239,7 +240,8 @@ export class UnifiedDatabaseService {
       const mappedData = (data || []).map(scenario => ({
         ...scenario,
         patient_prompt: scenario.patient_prompt || null,
-        evaluation_criteria: scenario.evaluation_criteria || null
+        evaluation_criteria: scenario.evaluation_criteria || null,
+        voiceType: scenario.voice_type || 'male'
       }));
       
       return mappedData;
@@ -403,6 +405,7 @@ export class UnifiedDatabaseService {
         description: scenarioData.description,
         patient_prompt: scenarioData.patientPrompt,
         evaluation_criteria: scenarioData.evaluationCriteria,
+        voice_type: scenarioData.voiceType || 'male',
         image_url: scenarioData.imageUrl || null,
         created_by: scenarioData.createdBy,
       })
@@ -447,6 +450,7 @@ export class UnifiedDatabaseService {
     if (updates.patientPrompt !== undefined) updateData.patient_prompt = updates.patientPrompt;
     if (updates.evaluationCriteria !== undefined) updateData.evaluation_criteria = updates.evaluationCriteria;
     if (updates.imageUrl !== undefined) updateData.image_url = updates.imageUrl;
+    if (updates.voiceType !== undefined) updateData.voice_type = updates.voiceType;
     if (updates.pineconeIndex !== undefined) updateData.pinecone_index = updates.pineconeIndex;
 
     console.log(`📊 Updating scenario ${id} with data:`, updateData);

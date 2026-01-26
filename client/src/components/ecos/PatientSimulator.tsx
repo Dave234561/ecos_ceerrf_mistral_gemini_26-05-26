@@ -286,8 +286,38 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     try { window.speechSynthesis.cancel(); } catch {}
     const utter = new window.SpeechSynthesisUtterance(last.content);
     utter.lang = 'fr-FR';
+    
+    // Select voice based on scenario preference
+    const voices = window.speechSynthesis.getVoices();
+    const voiceType = session?.scenario?.voiceType || session?.scenario?.voice_type || 'male';
+    
+    if (voices.length > 0) {
+      // Try to find a suitable French voice
+      const frenchVoices = voices.filter(v => v.lang.startsWith('fr'));
+      if (frenchVoices.length > 0) {
+        if (voiceType === 'female') {
+          // Look for common female names in voice synthesis
+          const femaleVoice = frenchVoices.find(v => 
+            v.name.toLowerCase().includes('hortense') || 
+            v.name.toLowerCase().includes('julie') ||
+            v.name.toLowerCase().includes('female') ||
+            v.name.toLowerCase().includes('femme')
+          );
+          if (femaleVoice) utter.voice = femaleVoice;
+        } else {
+          // Look for common male names or default
+          const maleVoice = frenchVoices.find(v => 
+            v.name.toLowerCase().includes('paul') || 
+            v.name.toLowerCase().includes('male') ||
+            v.name.toLowerCase().includes('homme')
+          );
+          if (maleVoice) utter.voice = maleVoice;
+        }
+      }
+    }
+
     utter.rate = 1.0;
-    utter.pitch = 1.0;
+    utter.pitch = voiceType === 'female' ? 1.1 : 0.9;
     try { window.speechSynthesis.speak(utter); } catch {}
     return () => {
       try { window.speechSynthesis.cancel(); } catch {}
