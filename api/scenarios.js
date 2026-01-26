@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       const fetchStrategies = [
         {
           name: 'direct-rest-api',
-          url: `${supabaseUrl}/rest/v1/scenarios?order=created_at.desc&limit=100`,
+          url: `${supabaseUrl}/rest/v1/scenarios?select=id,title,description,patient_prompt,evaluation_criteria,image_url,voice_type,created_by,created_at,updated_at&order=created_at.desc&limit=100`,
           headers: {
             'apikey': supabaseKey,
             'Authorization': `Bearer ${supabaseKey}`,
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
         },
         {
           name: 'simple-rest-api',
-          url: `${supabaseUrl}/rest/v1/scenarios`,
+          url: `${supabaseUrl}/rest/v1/scenarios?select=id,title,description,patient_prompt,evaluation_criteria,image_url,voice_type,created_by,created_at,updated_at`,
           headers: {
             'apikey': supabaseKey,
             'Authorization': `Bearer ${supabaseKey}`,

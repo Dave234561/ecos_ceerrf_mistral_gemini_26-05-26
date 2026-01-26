@@ -432,7 +432,7 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
       }
 
       // Check if user has teacher/admin role
-      if (user.role && user.role !== 'teacher' && user.role !== 'admin') {
+      if (user.role && (user.role as string) !== 'teacher' && (user.role as string) !== 'admin') {
         console.warn('⚠️ Invalid role for teacher dashboard:', { email: user.email, role: user.role });
         // Force logout and redirect to login
         try {
@@ -499,8 +499,8 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
 
 
   // Use scenarios from dedicated API call
-  const scenarios = teacherScenarios || [];
-  const sessions = dashboardData?.sessions || [];
+  const scenarios = Array.isArray(teacherScenarios) ? teacherScenarios : [];
+  const sessions = Array.isArray(dashboardData?.sessions) ? dashboardData.sessions : [];
 
 
   // Use stats from dashboard API
@@ -870,9 +870,7 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
                     teacherEmail={email}
                     onViewDetails={(student) => setSelectedStudent(student)}
                   />
-                  <SessionSummaryView
-                    teacherEmail={email}
-                  />
+                  <SessionSummaryView />
                 </div>
               )}
             </ErrorBoundary>

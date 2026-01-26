@@ -175,7 +175,7 @@ export class UnifiedDatabaseService {
       const client = await this.getClient();
       const timestamp = new Date().toISOString();
 
-      const { error } = await withRetry(
+      const { error } = (await withRetry(
         () => client
           .from('users')
           .upsert([
@@ -188,7 +188,7 @@ export class UnifiedDatabaseService {
           ...RetryPresets.database,
           operationName: 'Supabase ensureUserExists'
         }
-      );
+      )) as any;
 
       if (error) {
         // Duplicate inserts are safe to ignore; anything else should be logged for visibility
@@ -237,7 +237,7 @@ export class UnifiedDatabaseService {
       console.log(`✅ Retrieved ${data?.length || 0} scenarios`);
       
       // Map database column names to expected property names
-      const mappedData = (data || []).map(scenario => ({
+      const mappedData = (data || []).map((scenario: any) => ({
         ...scenario,
         patient_prompt: scenario.patient_prompt || null,
         evaluation_criteria: scenario.evaluation_criteria || null,
@@ -296,8 +296,8 @@ export class UnifiedDatabaseService {
       }
 
       const sessions = allSessions || [];
-      const activeSessions = sessions.filter(s => s.status === 'active' || s.status === 'in_progress').length;
-      const completedSessions = sessions.filter(s => s.status === 'completed').length;
+      const activeSessions = sessions.filter((s: any) => s.status === 'active' || s.status === 'in_progress').length;
+      const completedSessions = sessions.filter((s: any) => s.status === 'completed').length;
 
       // Count ALL students from users table (not just those with sessions)
       let totalStudents = 0;
@@ -311,12 +311,12 @@ export class UnifiedDatabaseService {
           totalStudents = users.length;
         } else {
           // Fallback: count unique students from sessions only
-          const uniqueStudents = new Set(sessions.map(s => s.student_email).filter(Boolean));
+          const uniqueStudents = new Set(sessions.map((s: any) => s.student_email).filter(Boolean));
           totalStudents = uniqueStudents.size;
         }
       } catch (error: any) {
         console.warn('⚠️ Error counting users, falling back to session-based count');
-        const uniqueStudents = new Set(sessions.map(s => s.student_email).filter(Boolean));
+        const uniqueStudents = new Set(sessions.map((s: any) => s.student_email).filter(Boolean));
         totalStudents = uniqueStudents.size;
       }
 
@@ -327,7 +327,7 @@ export class UnifiedDatabaseService {
         activeSessions,
         completedSessions,
         totalStudents,
-        sessions: sessions.map(s => ({
+        sessions: sessions.map((s: any) => ({
           id: s.session_id,
           sessionId: s.session_id,
           studentEmail: s.student_email,
@@ -499,7 +499,7 @@ export class UnifiedDatabaseService {
         throw error;
       }
 
-      console.log(`📋 Available scenarios: ${(data || []).map(s => `ID ${s.id}: "${s.title}"`).join(', ')}`);
+      console.log(`📋 Available scenarios: ${(data || []).map((s: any) => `ID ${s.id}: "${s.title}"`).join(', ')}`);
       return data || [];
     } catch (error: any) {
       console.error('❌ Error fetching available scenario IDs:', error.message);
@@ -818,7 +818,7 @@ export class UnifiedDatabaseService {
       } else {
         // OPTIMIZED PATH: Use OR filter to get all sessions in one query
         // Get sessions where user is creator OR assigned teacher
-        const assignedSessionIds = (teacherAssignments || []).map(a => a.training_session_id);
+        const assignedSessionIds = (teacherAssignments || []).map((a: any) => a.training_session_id);
 
         // Build OR filter: created_by = X OR id IN (assigned sessions)
         const orConditions = [`created_by.eq.${createdBy}`];
@@ -840,7 +840,7 @@ export class UnifiedDatabaseService {
 
       // Get associated students for each session
       const sessionsWithDetails = await Promise.all(
-        allSessions.map(async (session) => {
+        allSessions.map(async (session: any) => {
           // Get students
           const { data: students, error: studentsError } = await client
             .from('training_session_students')
@@ -1293,7 +1293,7 @@ export class UnifiedDatabaseService {
       // Ensure student exists to satisfy sessions.student_email foreign key
       await this.ensureUserExists(sessionData.studentEmail);
 
-      const { data, error } = await withRetry(
+      const { data, error } = (await withRetry(
         () => client
           .from('sessions')
           .insert({
@@ -1311,7 +1311,7 @@ export class UnifiedDatabaseService {
           ...RetryPresets.database,
           operationName: 'Supabase createSession'
         }
-      );
+      )) as any;
 
       if (error) {
         console.error('❌ Error creating ECOS session:', error);
@@ -1423,8 +1423,8 @@ export class UnifiedDatabaseService {
       // Format the response to match the expected structure
       // Filter out sessions without a valid session_id
       return (data || [])
-        .filter(session => session.session_id && session.session_id !== 'null' && session.session_id !== 'undefined')
-        .map(session => ({
+        .filter((session: any) => session.session_id && session.session_id !== 'null' && session.session_id !== 'undefined')
+        .map((session: any) => ({
         id: session.session_id,
         sessionId: session.session_id,
         studentEmail: session.student_email,
@@ -1470,7 +1470,7 @@ export class UnifiedDatabaseService {
         return [];
       }
 
-      const studentEmails = enrollments.map(e => e.student_email);
+      const studentEmails = enrollments.map((e: any) => e.student_email);
       console.log(`📚 Found ${studentEmails.length} students in training session`);
 
       // Get all sessions for these students
@@ -1503,7 +1503,7 @@ export class UnifiedDatabaseService {
       console.log(`✅ Found ${data?.length || 0} total sessions for training session ${trainingSessionId}`);
 
       // Format the response to match the expected structure
-      return (data || []).map(session => ({
+      return (data || []).map((session: any) => ({
         id: session.session_id,
         sessionId: session.session_id,
         studentEmail: session.student_email,
@@ -1556,7 +1556,7 @@ export class UnifiedDatabaseService {
       console.log(`🔍 [storeSessionMessage] Found session in DB - id: ${session.id}, attempting insert...`);
 
       const timestamp = new Date().toISOString();
-      const { data, error } = await withRetry(
+      const { data, error } = (await withRetry(
         () => client
           .from('exchanges')
           .insert({
@@ -1572,7 +1572,7 @@ export class UnifiedDatabaseService {
           ...RetryPresets.database,
           operationName: 'Supabase storeSessionMessage'
         }
-      );
+      )) as any;
 
       if (error) {
         console.error(`❌ [storeSessionMessage] Supabase insert failed for session ${messageData.sessionId}:`, error);
@@ -1759,7 +1759,7 @@ export class UnifiedDatabaseService {
       console.log(`🔍 [DEBUG] Insert payload columns:`, Object.keys(insertPayload));
       console.log(`🔍 [DEBUG] Session DB ID:`, session.id, `String ID:`, evalData.sessionId);
 
-      const { data, error } = await withRetry(
+      const { data, error } = (await withRetry(
         () => client
           .from('evaluations')
           .insert(insertPayload)
@@ -1769,7 +1769,7 @@ export class UnifiedDatabaseService {
           ...RetryPresets.database,
           operationName: 'Supabase createEvaluation'
         }
-      );
+      )) as any;
 
       console.log(`🔍 [DEBUG] Supabase response - data:`, data ? 'EXISTS' : 'NULL', `error:`, error ? error.code : 'NONE');
 
