@@ -156,6 +156,15 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     nextPlayTimeRef.current = 0;
   };
 
+  // Fetch session details - MUST be declared before useEffect that uses it
+  const { data: session } = useQuery({
+    queryKey: ['ecos-session', sessionId],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/ecos/sessions/${sessionId}?email=${email}`);
+      return response.session;
+    }
+  });
+
   const sendSpeakText = (text: string) => {
     const dc = dcRef.current;
     if (!dc || dc.readyState !== 'open') return;
@@ -401,14 +410,6 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     };
   }, [messages]);
 
-  // Fetch session details
-  const { data: session } = useQuery({
-    queryKey: ['ecos-session', sessionId],
-    queryFn: async () => {
-      const response = await apiRequest('GET', `/api/ecos/sessions/${sessionId}?email=${email}`);
-      return response.session;
-    }
-  });
 
   // Send message mutation
   const sendMessageMutation = useMutation({
