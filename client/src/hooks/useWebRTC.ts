@@ -47,7 +47,7 @@ export default function useWebRTC({
   useEffect(() => {
     async function setup() {
       try {
-        localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
         peer.current = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
         localStream.current.getTracks().forEach((track) => {
           peer.current?.addTrack(track, localStream.current!);
