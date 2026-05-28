@@ -24,7 +24,7 @@ interface ConversationMemory {
   sessionId: string;
   studentEmail: string;
   scenarioId: number;
-  studentRole: 'infirmier' | 'docteur' | 'étudiant';
+  studentRole: 'CEERRF' | 'docteur' | 'étudiant';
   patientPersona?: string;
   conversationHistory: ConversationMessage[];
   contextSummary?: string;
@@ -71,7 +71,7 @@ export class ConversationMemoryService {
       sessionId,
       studentEmail,
       scenarioId,
-      studentRole: 'infirmier', // Default to infirmier for ECOS-infirmier platform
+      studentRole: 'CEERRF', // Default to CEERRF for ECOS-CEERRF platform
       patientPersona: patientPrompt,
       conversationHistory: [],
       lastActivity: new Date(),
@@ -129,11 +129,11 @@ export class ConversationMemoryService {
   /**
    * Detect student role from introduction
    */
-  detectStudentRole(content: string): 'infirmier' | 'docteur' | 'étudiant' {
+  detectStudentRole(content: string): 'CEERRF' | 'docteur' | 'étudiant' {
     const lowerContent = content.toLowerCase();
     
-    if (lowerContent.includes('infirmier') || lowerContent.includes('infirmière')) {
-      return 'infirmier';
+    if (lowerContent.includes('CEERRF') || lowerContent.includes('infirmier') || lowerContent.includes('infirmière')) {
+      return 'CEERRF';
     }
     
     if (lowerContent.includes('docteur') || lowerContent.includes('médecin')) {
@@ -179,7 +179,7 @@ export class ConversationMemoryService {
   } {
     const memory = this.cache.get(sessionId);
     if (!memory) {
-      return { history: '', role: 'infirmier', medicalContext: '' };
+      return { history: '', role: 'CEERRF', medicalContext: '' };
     }
 
     // Build conversation history summary
@@ -232,15 +232,15 @@ export class ConversationMemoryService {
    */
   getStudentAddressing(sessionId: string): string {
     const memory = this.cache.get(sessionId);
-    if (!memory) return 'infirmier'; // Default for ECOS-infirmier platform
+    if (!memory) return 'CEERRF'; // Default for ECOS-CEERRF platform
 
     switch (memory.studentRole) {
-      case 'infirmier':
-        return 'infirmier';
+      case 'CEERRF':
+        return 'CEERRF';
       case 'docteur':
         return 'docteur';
       default:
-        return 'infirmier'; // Default for ECOS-infirmier platform
+        return 'CEERRF'; // Default for ECOS-CEERRF platform
     }
   }
 

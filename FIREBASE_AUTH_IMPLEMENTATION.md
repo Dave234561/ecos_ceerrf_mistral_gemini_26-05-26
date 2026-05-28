@@ -45,7 +45,7 @@ Le script va:
 
 ### 2. Activer les Méthodes d'Authentification dans Firebase Console
 
-1. Aller sur https://console.firebase.google.com/project/ecos-beaujon/authentication/providers
+1. Aller sur https://console.firebase.google.com/project/ecos-ceerrf/authentication/providers
 
 2. **Activer Email/Password:**
    - Cliquer sur "Email/Password"
@@ -65,8 +65,8 @@ Assurez-vous que le fichier `.env` contient toutes les variables Firebase:
 ```env
 # Variables déjà configurées ✅
 VITE_FIREBASE_API_KEY=AIzaSyA0S8z0u6IvjBcSE6HNHv6JJCeQeYU_5k8
-VITE_FIREBASE_AUTH_DOMAIN=ecos-beaujon.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=ecos-beaujon
+VITE_FIREBASE_AUTH_DOMAIN=ecos-ceerrf.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=ecos-ceerrf
 # ... (toutes les autres sont déjà présentes)
 ```
 
@@ -212,7 +212,7 @@ function App() {
 Si vous rencontrez des problèmes:
 
 1. **Vérifier les logs du serveur** - Les erreurs Firebase sont détaillées
-2. **Vérifier la console Firebase** - https://console.firebase.google.com/project/ecos-beaujon
+2. **Vérifier la console Firebase** - https://console.firebase.google.com/project/ecos-ceerrf
 3. **Vérifier Supabase** - https://supabase.com/dashboard/project/bgrxjdcpxgdunanwtpvv
 
 ## 🎯 Résumé des Actions Immédiates
@@ -228,4 +228,4 @@ Si vous rencontrez des problèmes:
 
 **Date de création:** 2025-09-30
 **Auteur:** Claude Code
-**Projet:** ECOS-Beaujon - Firebase Authentication Integration
+**Projet:** ECOS-CEERRF - Firebase Authentication Integration

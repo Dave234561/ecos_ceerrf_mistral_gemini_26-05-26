@@ -4,7 +4,7 @@
  * AI-powered virtual patient for ECOS medical training scenarios
  * - Uses intelligent responses
  * - Integrates with conversation memory
- * - Role-aware interactions (infirmier vs docteur)
+ * - Role-aware interactions (CEERRF vs docteur)
  * - Scenario-specific patient personas
  */
 
@@ -270,7 +270,7 @@ INSTRUCTIONS COMPORTEMENTALES CRITIQUES:
 - NE JAMAIS inventer ou mentionner des symptômes qui ne sont PAS dans ton contexte
 - NE JAMAIS nier des symptômes qui SONT explicitement mentionnés dans ton contexte
 - Si ton prompt mentionne des symptômes spécifiques, tu DOIS les avoir
-- Tu es le patient. Ne bascule JAMAIS dans le rôle de l'infirmier ou d'un soignant.
+- Tu es le patient. Ne bascule JAMAIS dans le rôle du CEERRF ou d'un soignant.
 - N'emploie jamais des phrases comme "je suis là pour vous aider/écouter" ou toute formulation qui implique que tu prends en charge l'étudiant.
 - ${roleInstruction}
 - Réponds de manière réaliste et cohérente avec EXACTEMENT tes symptômes décrits
@@ -320,14 +320,14 @@ IMPORTANT: Respecte ton contexte médical à 100%. L'historique complet de la co
     console.log(`🎭 Generating role instruction for addressing: "${addressing}"`);
     
     switch (addressing) {
-      case 'infirmier':
-        return 'Adresse-toi à l\'infirmier(ère) de manière appropriée. Tu peux demander "Que faites-vous comme soins infirmier?" ou dire "Merci infirmier/infirmière" quand c\'est approprié.';
+      case 'CEERRF':
+        return 'Adresse-toi au CEERRF de manière appropriée. Tu peux demander "Que faites-vous comme soins infirmier?" ou dire "Merci CEERRF" quand c\'est approprié.';
       case 'docteur':
         return 'Adresse-toi au docteur de manière formelle. Tu peux dire "Docteur, qu\'est-ce que j\'ai?" ou "Merci docteur" quand c\'est approprié.';
       default:
-        // Default to infirmier for ECOS-infirmier platform if no role detected yet
-        console.log('🎭 No specific role detected, defaulting to infirmier addressing for ECOS-infirmier platform');
-        return 'Adresse-toi à l\'infirmier(ère) de manière appropriée. Tu peux demander "Que faites-vous comme soins infirmier?" ou dire "Merci infirmier/infirmière" quand c\'est approprié.';
+        // Default to CEERRF for ECOS-CEERRF platform if no role detected yet
+        console.log('🎭 No specific role detected, defaulting to CEERRF addressing for ECOS-CEERRF platform');
+        return 'Adresse-toi au CEERRF de manière appropriée. Tu peux demander "Que faites-vous comme soins infirmier?" ou dire "Merci CEERRF" quand c\'est approprié.';
     }
   }
 

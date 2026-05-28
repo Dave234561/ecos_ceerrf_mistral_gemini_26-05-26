@@ -46,7 +46,7 @@ export const exchanges = pgTable("exchanges", {
   timestamp: timestamp("timestamp").notNull().defaultNow(),
   sessionId: text("session_id"), // Link to ECOS session
   scenarioId: integer("scenario_id"), // Link to scenario
-  studentRole: text("student_role"), // infirmier, docteur, étudiant
+  studentRole: text("student_role"), // CEERRF, docteur, étudiant
   contextData: jsonb("context_data"), // Additional metadata
 });
 

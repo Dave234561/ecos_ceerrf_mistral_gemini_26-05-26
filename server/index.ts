@@ -162,7 +162,7 @@ app.get('/rate-limit-status', rateLimitStatus());
 
 
 (async () => {
-  logger.info('Starting ECOS-Infirmier Application...');
+  logger.info('Starting ECOS-CEERRF Application...');
   
   // Validate environment
   validateEnvironment();

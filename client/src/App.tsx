@@ -94,7 +94,7 @@ function Router({ email }: { email: string | null }) {
                     <MessageCircle className="text-primary text-3xl h-8 w-8" />
                   </div>
                 </div>
-                <h3 className="text-center font-heading font-semibold text-xl mb-2">ECOS-Infirmier</h3>
+                <h3 className="text-center font-heading font-semibold text-xl mb-2">ECOS-CEERRF</h3>
                 <p className="text-center text-neutral-600 mb-6">
                   Plateforme d'apprentissage pour les examens cliniques
                 </p>

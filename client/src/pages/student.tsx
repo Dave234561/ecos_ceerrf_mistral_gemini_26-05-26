@@ -287,7 +287,7 @@ export default function StudentPage({ email: emailProp }: StudentPageProps) {
               </div>
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-green-900 mb-1">
-                  Bienvenue sur ECOS-Infirmier! 🎉
+                  Bienvenue sur ECOS-CEERRF! 🎉
                 </h3>
                 <p className="text-sm text-green-700">
                   Connexion réussie. Vous pouvez maintenant commencer vos examens cliniques simulés.

@@ -3186,7 +3186,7 @@ Format JSON attendu :
       });
 
       const overallScore = Number(evaluationRecord.global_score ?? 0);
-      const summary = evaluationRecord.summary || `Évaluation du scénario "${scenarioTitle}" basée sur ${messages.length} échange${messages.length > 1 ? 's' : ''} patient/infirmier.`;
+      const summary = evaluationRecord.summary || `Évaluation du scénario "${scenarioTitle}" basée sur ${messages.length} échange${messages.length > 1 ? 's' : ''} patient/CEERRF.`;
 
       res.status(200).json({
         report: {

@@ -43,7 +43,7 @@ class TrainingSessionService {
    * CRITICAL: Always uses production URL to avoid Firebase domain authorization issues
    *
    * Firebase requires pre-authorized domains for authentication.
-   * Preview deployment URLs (ecos-infirmier-b-20-xyz123.vercel.app) are NOT authorized.
+   * Preview deployment URLs (ecos-ceerrf-b-20-xyz123.vercel.app) are NOT authorized.
    *
    * TRADE-OFF: Preview deployments cannot test enrollment flow with Firebase authentication.
    * All enrollment links point to production domain, even when created in previews.
@@ -53,7 +53,7 @@ class TrainingSessionService {
   createEnrollmentUrl(token: string): string {
     const baseUrl = process.env.BASE_URL ||
                     (process.env.VERCEL_ENV === 'production'
-                      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL || 'ecos-infirmier-b-20.vercel.app'}`
+                      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL || 'ecos-ceerrf-b-20.vercel.app'}`
                       : process.env.VERCEL_URL
                         ? `https://${process.env.VERCEL_URL}`
                         : 'http://localhost:5000');

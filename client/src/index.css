@@ -12,7 +12,7 @@
 .typing-dot {
   height: 6px;
   width: 6px;
-  background: #6b7280;
+  background: #0BBAF4;
   border-radius: 50%;
   display: inline-block;
   animation: typing-bounce 1.4s infinite ease-in-out;
@@ -58,21 +58,21 @@
 
 :root {
       --background: 0 0% 100%;
---foreground: 20 14.3% 4.1%;
---muted: 60 4.8% 95.9%;
---muted-foreground: 25 5.3% 44.7%;
+--foreground: 210 30% 12%;
+--muted: 195 89% 95%;
+--muted-foreground: 210 15% 45%;
 --popover: 0 0% 100%;
---popover-foreground: 20 14.3% 4.1%;
+--popover-foreground: 210 30% 12%;
 --card: 0 0% 100%;
---card-foreground: 20 14.3% 4.1%;
---border: 20 5.9% 90%;
---input: 20 5.9% 90%;
---primary: 207 90% 54%;
---primary-foreground: 211 100% 99%;
---secondary: 60 4.8% 95.9%;
---secondary-foreground: 24 9.8% 10%;
---accent: 60 4.8% 95.9%;
---accent-foreground: 24 9.8% 10%;
+--card-foreground: 210 30% 12%;
+--border: 195 50% 86%;
+--input: 195 50% 86%;
+--primary: 195 91% 50%;
+--primary-foreground: 0 0% 100%;
+--secondary: 195 89% 95%;
+--secondary-foreground: 210 30% 15%;
+--accent: 195 89% 95%;
+--accent-foreground: 195 91% 30%;
 
 
 /* CARTE PRINCIPALE AVEC PHOTO PANORAMIQUE */
@@ -253,8 +253,8 @@
 }
 
 --destructive: 0 84.2% 60.2%;
---destructive-foreground: 60 9.1% 97.8%;
---ring: 20 14.3% 4.1%;
+--destructive-foreground: 0 0% 100%;
+--ring: 195 91% 50%;
 --radius: 0.5rem;
   }
   
@@ -269,8 +269,8 @@
     --card-foreground: 0 0% 98%;
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
-    --primary: 207 90% 54%;
-    --primary-foreground: 211 100% 99%;
+    --primary: 195 91% 50%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
     --accent: 240 3.7% 15.9%;

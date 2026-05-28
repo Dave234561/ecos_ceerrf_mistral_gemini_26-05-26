@@ -165,7 +165,7 @@ export default function RegisterPage() {
             Créer un compte
           </CardTitle>
           <CardDescription className="text-center">
-            Inscrivez-vous pour accéder à ECOS-Infirmier
+            Inscrivez-vous pour accéder à ECOS-CEERRF
           </CardDescription>
         </CardHeader>
 

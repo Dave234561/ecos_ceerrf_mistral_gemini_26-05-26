@@ -87,7 +87,7 @@ export class UnifiedDatabaseService {
         },
         global: {
           headers: {
-            'x-client-info': 'ecos-infirmier-server'
+            'x-client-info': 'ecos-ceerrf-server'
           },
         },
         db: {

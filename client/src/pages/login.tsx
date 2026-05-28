@@ -212,7 +212,7 @@ export default function LoginPage() {
             Connexion
           </CardTitle>
           <CardDescription className="text-center">
-            Connectez-vous à votre compte ECOS-Infirmier
+            Connectez-vous à votre compte ECOS-CEERRF
           </CardDescription>
         </CardHeader>
 

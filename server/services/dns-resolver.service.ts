@@ -44,6 +44,6 @@ export class DNSResolverService {
   }
 
   static buildConnectionUrl(resolvedHost: string): string {
-    return `postgresql://postgres:ceerrfbeaujon@${resolvedHost}:5432/postgres`;
+    return `postgresql://postgres:ceerrfceerrf@${resolvedHost}:5432/postgres`;
   }
 }
