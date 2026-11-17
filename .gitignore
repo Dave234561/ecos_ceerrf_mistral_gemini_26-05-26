@@ -22,3 +22,4 @@ api/server/
 !api/_lib/serverless-app.js
 !api/_lib/serverless-app.js.map
 .env*.local
+.env*
