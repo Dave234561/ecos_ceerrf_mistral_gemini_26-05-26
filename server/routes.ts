@@ -39,9 +39,12 @@ import {
 import { APIError, asyncHandler, sendErrorResponse } from './middleware/error-handler.middleware.js';
 import { apiLogger, logger } from './services/logger.service.js';
 import { openaiService } from './services/openai.service.js';
+import { registerLtiRoutes } from './routes/lti.routes.js';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
+
+  registerLtiRoutes(app);
 
   // WebRTC signaling (voice realtime)
   try {

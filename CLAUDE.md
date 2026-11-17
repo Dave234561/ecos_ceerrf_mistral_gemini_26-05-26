@@ -164,6 +164,13 @@ GET  /ready                               - Readiness probe for deployments
 GET  /diagnostic                          - Frontend diagnostic interface
 ```
 
+#### LTI 1.3 (LearnWorlds)
+- **Service**: `server/services/lti.service.ts`, routes in `server/routes/lti.routes.ts`
+- **Endpoints**: `/api/lti/login` (OIDC login), `/api/lti/launch` (launch), `/api/lti/jwks` (tool public key)
+- **Flow**: validated launch → Firebase custom token → `/lti/launch` (client) → `signInWithCustomToken` → `/student?scenario=<id>`
+- **Config**: `LTI_ISSUER`, `LTI_CLIENT_ID`, `LTI_DEPLOYMENT_ID`, `LTI_AUTH_URL`, `LTI_JWKS_URL`, `LTI_PRIVATE_KEY`; table `lti_nonces` (`migrations/lti-integration.sql`)
+- **Rule**: an LTI launch only opens student sessions; teacher/admin accounts are refused
+
 #### Error Handling Pattern
 - **Database errors**: Continue execution with warnings, don't break user flow
 - **Session not found**: Return empty arrays, log warnings

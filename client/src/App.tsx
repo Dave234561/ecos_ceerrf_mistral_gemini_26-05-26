@@ -14,6 +14,7 @@ import DiagnosticPage from "@/pages/diagnostic";
 import LoginPage from "@/pages/login";
 import RegisterPage from "@/pages/register";
 import EnrollmentPage from "@/pages/EnrollmentPage";
+import LtiLaunchPage from "@/pages/lti-launch";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { apiRequest } from "@/lib/queryClient";
 import { MessageCircle } from "lucide-react";
@@ -51,6 +52,11 @@ function Router({ email }: { email: string | null }) {
       {/* Public enrollment route - accessible with token */}
       <Route path="/enroll/:token">
         {(params) => <EnrollmentPage />}
+      </Route>
+
+      {/* LTI launch landing - signs in with the token issued by the backend */}
+      <Route path="/lti/launch">
+        <LtiLaunchPage />
       </Route>
 
       {/* Protected routes - no email in URL needed */}

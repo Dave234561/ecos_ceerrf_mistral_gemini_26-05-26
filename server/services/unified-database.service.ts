@@ -2069,6 +2069,19 @@ export class UnifiedDatabaseService {
   }
 
   /**
+   * Record an LTI launch nonce. Returns false if it was already used (replay).
+   * Throws on database errors: a launch must not be accepted without this check.
+   */
+  async consumeLtiNonce(nonce: string): Promise<boolean> {
+    if (!this.supabase) await this.initialize();
+
+    const { error } = await this.supabase.from('lti_nonces').insert({ nonce });
+    if (!error) return true;
+    if (error.code === '23505') return false;
+    throw new Error(`LTI nonce storage failed: ${error.message}`);
+  }
+
+  /**
    * Get metrics for monitoring
    */
   getMetrics(): DatabaseMetrics {

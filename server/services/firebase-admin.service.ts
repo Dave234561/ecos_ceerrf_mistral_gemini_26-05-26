@@ -202,6 +202,15 @@ class FirebaseAdminService {
   }
 
   /**
+   * Create a custom token the client exchanges for a Firebase session (signInWithCustomToken)
+   * @param uid - Firebase UID
+   */
+  async createCustomToken(uid: string): Promise<string> {
+    await this.initialize();
+    return this.firebaseAuth.getAuth().createCustomToken(uid);
+  }
+
+  /**
    * Set custom user claims (roles)
    * @param uid - Firebase UID
    * @param claims - Custom claims object (e.g., { role: 'admin' })

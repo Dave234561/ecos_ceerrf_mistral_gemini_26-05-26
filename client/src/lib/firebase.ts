@@ -12,6 +12,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithCustomToken,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -133,6 +134,16 @@ export async function signInWithGoogle(): Promise<UserCredential> {
     console.error('❌ Google sign in failed:', error.message);
     throw error;
   }
+}
+
+/**
+ * Sign in with a custom token issued by the backend (LTI launch)
+ */
+export async function signInWithToken(token: string): Promise<UserCredential> {
+  if (!auth) {
+    throw new Error('Firebase auth not initialized');
+  }
+  return signInWithCustomToken(auth, token);
 }
 
 /**
