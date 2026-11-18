@@ -13,7 +13,6 @@ import { Loader2 } from 'lucide-react';
 
 const ERROR_MESSAGES: Record<string, string> = {
   email_missing: "Votre plateforme de formation n'a pas transmis votre adresse email. Contactez votre administrateur.",
-  privileged_account: 'Les comptes enseignant et administrateur doivent se connecter directement sur la plateforme ECOS.',
   replay: 'Ce lien de lancement a déjà été utilisé. Relancez l\'activité depuis votre cours.',
   invalid_state: 'Le lancement a expiré. Relancez l\'activité depuis votre cours.'
 };
@@ -39,8 +38,11 @@ export default function LtiLaunchPage() {
     }
 
     const scenario = params.get('scenario');
+    const destination = params.get('role') === 'teacher'
+      ? '/teacher'
+      : scenario ? `/student?scenario=${encodeURIComponent(scenario)}` : '/student';
     signInWithToken(token)
-      .then(() => setLocation(scenario ? `/student?scenario=${encodeURIComponent(scenario)}` : '/student'))
+      .then(() => setLocation(destination))
       .catch((err) => {
         console.error('❌ LTI sign in failed:', err.message);
         setError(DEFAULT_ERROR);

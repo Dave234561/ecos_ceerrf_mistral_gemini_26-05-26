@@ -169,7 +169,7 @@ GET  /diagnostic                          - Frontend diagnostic interface
 - **Endpoints**: `/api/lti/login` (OIDC login), `/api/lti/launch` (launch), `/api/lti/jwks` (tool public key)
 - **Flow**: validated launch → Firebase custom token → `/lti/launch` (client) → `signInWithCustomToken` → `/student?scenario=<id>`
 - **Config**: `LTI_ISSUER`, `LTI_CLIENT_ID`, `LTI_DEPLOYMENT_ID`, `LTI_AUTH_URL`, `LTI_JWKS_URL`, `LTI_PRIVATE_KEY`; table `lti_nonces` (`migrations/lti-integration.sql`)
-- **Rule**: an LTI launch only opens student sessions; teacher/admin accounts are refused
+- **Rule**: the LMS email is trusted for every role (LearnWorlds accounts are created by the school admin, with email verification); teachers land on `/teacher`, students and admins on the scenario
 
 #### Error Handling Pattern
 - **Database errors**: Continue execution with warnings, don't break user flow

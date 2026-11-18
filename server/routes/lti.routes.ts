@@ -3,7 +3,6 @@ import type { Express, Request, Response } from 'express';
 import { ltiService, LtiError } from '../services/lti.service.js';
 import { firebaseAdminService } from '../services/firebase-admin.service.js';
 import { unifiedDb } from '../services/unified-database.service.js';
-import { authService } from '../middleware/auth.middleware.js';
 import { authLogger } from '../services/logger.service.js';
 
 function getLaunchUrl(req: Request): string {
@@ -54,20 +53,19 @@ export function registerLtiRoutes(app: Express) {
         throw new LtiError('email_missing', 'LTI launch has no email claim');
       }
 
-      // The email comes from the LMS: never open a teacher/admin session from it
+      // Teacher/admin accounts are accepted: the LMS accounts are created by the school admin
+      // with verified emails. Student routes reject teachers, so they go to their dashboard.
       const dbUser = await unifiedDb.getUserByEmail(launch.email);
       const role = dbUser ? await unifiedDb.getUserRole(dbUser.id) : 'student';
-      if (role !== 'student' || authService.isAdmin(launch.email)) {
-        throw new LtiError('privileged_account', 'LTI launch refused for a teacher/admin account');
-      }
 
       const firebaseUser = await firebaseAdminService.getUserByEmail(launch.email)
         || await firebaseAdminService.createUser(launch.email, crypto.randomBytes(32).toString('base64url'));
       const token = await firebaseAdminService.createCustomToken(firebaseUser.uid);
 
-      authLogger.info('LTI launch accepted', { email: launch.email, scenarioId: launch.scenarioId });
+      authLogger.info('LTI launch accepted', { email: launch.email, role, ltiRoles: launch.roles, scenarioId: launch.scenarioId });
       redirectToApp(res, {
         token,
+        ...(role === 'teacher' ? { role } : {}),
         ...(launch.scenarioId !== null ? { scenario: String(launch.scenarioId) } : {})
       });
     } catch (error: any) {
