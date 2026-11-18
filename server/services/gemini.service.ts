@@ -1,5 +1,4 @@
 // Gemini service for realtime analysis (texte et audio)
-import fetch from 'node-fetch';
 
 export class GeminiService {
   private apiKey: string;

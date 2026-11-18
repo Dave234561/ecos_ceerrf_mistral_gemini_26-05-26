@@ -65,7 +65,7 @@ export function registerLtiRoutes(app: Express) {
       authLogger.info('LTI launch accepted', { email: launch.email, role, ltiRoles: launch.roles, scenarioId: launch.scenarioId });
       redirectToApp(res, {
         token,
-        ...(role === 'teacher' ? { role } : {}),
+        ...(role === 'teacher' || role === 'admin' ? { role } : {}),
         ...(launch.scenarioId !== null ? { scenario: String(launch.scenarioId) } : {})
       });
     } catch (error: any) {

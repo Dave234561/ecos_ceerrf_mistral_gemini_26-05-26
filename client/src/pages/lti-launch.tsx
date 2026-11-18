@@ -38,7 +38,8 @@ export default function LtiLaunchPage() {
     }
 
     const scenario = params.get('scenario');
-    const destination = params.get('role') === 'teacher'
+    const role = params.get('role');
+    const destination = role === 'teacher' || role === 'admin'
       ? '/teacher'
       : scenario ? `/student?scenario=${encodeURIComponent(scenario)}` : '/student';
     signInWithToken(token)

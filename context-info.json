@@ -1,0 +1,143 @@
+{
+  "architecture": {
+    "frontend": "React 18 SPA served from dist/public and routed by vercel.json rewrites",
+    "backend": "Express server compiled to api/_lib/serverless-app.js and exposed through Vercel functions",
+    "database": "Supabase Postgres via UnifiedDatabaseService REST API; obsolete DATABASE_URL removed from Vercel",
+    "realtime": "Supabase Realtime subscriptions in client/src/lib/supabase-realtime.ts",
+    "auth": "Firebase Authentication on the client, Firebase Admin on the server",
+    "llm": "Mistral and Gemini provider services selected by environment configuration"
+  },
+  "dependencies": {
+    "runtime": "Node.js 22.x",
+    "frontend": "React 18, Vite 7, TypeScript",
+    "backend": "Express 4, Drizzle ORM, Firebase Admin",
+    "database": "Supabase Postgres, Pinecone",
+    "ai": "Mistral AI, Gemini API"
+  },
+  "mainEndpoints": [
+    "GET /api/health",
+    "GET /api/ecos/scenarios",
+    "POST /api/ecos/generate-criteria",
+    "POST /api/auth/firebase-login",
+    "POST /api/auth/firebase-register",
+    "GET /api/teacher/scenarios",
+    "GET /api/student/available-scenarios",
+    "/api/lti/login",
+    "/api/lti/launch",
+    "/api/lti/jwks"
+  ],
+  "criticalFiles": [
+    "vercel.json",
+    ".env.example",
+    "client/src/lib/firebase.ts",
+    "client/src/lib/supabase-realtime.ts",
+    "server/services/firebase-admin.service.ts",
+    "server/services/llm.service.ts",
+    "server/services/pinecone.service.ts",
+    "api/index.js",
+    "api/scenarios.js",
+    "server/routes/lti.routes.ts",
+    "server/services/lti.service.ts",
+    "migrations/lti-integration.sql",
+    "server/services/gemini.service.ts",
+    "client/src/pages/lti-launch.tsx"
+  ],
+  "environmentVariables": {
+    "environments": [
+      "Production",
+      "Preview",
+      "Development"
+    ],
+    "providers": [
+      "Supabase",
+      "Pinecone",
+      "Firebase",
+      "Mistral",
+      "Gemini"
+    ],
+    "additional": [
+      "OpenAI",
+      "JWT"
+    ],
+    "pinecone": {
+      "indexName": "n8n-awbg3z6",
+      "namespace": "ecos-ceerrf-mistral-gemini-26-05-26",
+      "note": "New Pinecone index creation is blocked by the current plan limit of 5 serverless indexes; a dedicated namespace is used instead."
+    },
+    "deployment": {
+      "productionUrl": "https://ecos-ceerrf-mistral-gemini-26-05-26.vercel.app",
+      "status": "ready",
+      "healthCheck": "healthy"
+    }
+  },
+  "integration": {
+    "branch": "feature/lti",
+    "supabaseSource": "bgrxjdcpxgdunanwtpvv",
+    "supabaseProductionTarget": "wpyoflavoquuzswqicwk",
+    "newDatabaseStatus": "12 tables created and verified; 3 scenarios and 1 author migrated",
+    "firebaseProject": "ecos-beaujon",
+    "authIssue": "Firebase auth/unauthorized-domain corrected; both exact deployment and stable feature/lti domains verified in Firebase API",
+    "stablePreviewDomain": "ecos-ceerrf-mistral-gemini-26-0-git-40e520-dave234561s-projects.vercel.app",
+    "vercelSupabaseConfiguration": "Five Supabase variables updated in existing Production/Preview/Development targets; obsolete DATABASE_URL removed. Only feature/lti Preview redeployed; main not merged or redeployed.",
+    "databaseUrlStatus": "Removed obsolete DATABASE_URL from Vercel. Active server/db.ts and serverless routes exclusively use UnifiedDatabaseService via Supabase REST. No active imports of legacy connection-pool/replitAuth.",
+    "scenarios": "Imported real scenarios 1, 4, 5 and their existing author reference; no students, sessions or results copied",
+    "deployment": "dpl_8CY113tamHuN2w7eCAMPcrUvuzCY READY; feature/lti Preview only",
+    "verification": {
+      "health": "HTTP 200 healthy",
+      "scenarios": "HTTP 200, connected true, count 3, service_role",
+      "frontend": "New Supabase project reference present, original reference absent; browser cache refreshed",
+      "googleLogin": "Verified: Google login completed, backend token exchange succeeded, new Firebase-linked user registered in new Supabase database, student dashboard shows 3 scenarios",
+      "lti": "Actual LearnWorlds launch confirmed by user and runtime logs on 2026-11-18"
+    },
+    "remaining": [
+      "Deploy feature/lti fix and verify preview",
+      "Verify actual patient answer in an authenticated session"
+    ],
+    "maintenance": "Consult and update this file with each subsequent configuration or code change.",
+    "ltiPrivateKey": {
+      "status": "RSA 2048 generated, validated and stored as sensitive Vercel variable",
+      "environment": "Preview",
+      "branch": "feature/lti",
+      "localStorage": "Outside repository, work/private/lti-private.pem, permissions 0600",
+      "verification": "HTTP 200 JWKS: RSA public key matches generated key; no private key components exposed"
+    },
+    "learnWorlds": {
+      "school": "https://academy.ceerrf.fr",
+      "toolName": "ECOS CEERRF",
+      "status": "Created successfully; verified in LTI Tools list and success notification",
+      "loginUrl": "https://ecos-ceerrf-mistral-gemini-26-0-git-40e520-dave234561s-projects.vercel.app/api/lti/login",
+      "launchUrl": "https://ecos-ceerrf-mistral-gemini-26-0-git-40e520-dave234561s-projects.vercel.app/api/lti/launch",
+      "jwksUrl": "https://ecos-ceerrf-mistral-gemini-26-0-git-40e520-dave234561s-projects.vercel.app/api/lti/jwks",
+      "deepLinkingUrl": null,
+      "platformValues": {
+        "LTI_ISSUER": "https://academy.ceerrf.fr/admin/api/lti/651f1e87b8fad565caeba42f",
+        "LTI_CLIENT_ID": "6afcd9f9c617da5fa30c32b4",
+        "LTI_DEPLOYMENT_ID": "01a1ebb3-72a9-71e0-bf03-f954ccb9f956",
+        "LTI_AUTH_URL": "https://academy.ceerrf.fr/admin/api/lti/651f1e87b8fad565caeba42f/auth/6afcd9f9c617da5fa30c32b4",
+        "LTI_JWKS_URL": "https://academy.ceerrf.fr/admin/api/lti/651f1e87b8fad565caeba42f/.well-known/jwks.json"
+      },
+      "tokenUrl": "https://academy.ceerrf.fr/admin/api/lti/651f1e87b8fad565caeba42f/token",
+      "vercelConfiguration": {
+        "environment": "Preview",
+        "gitBranch": "feature/lti",
+        "configuredVariables": [
+          "LTI_ISSUER",
+          "LTI_CLIENT_ID",
+          "LTI_DEPLOYMENT_ID",
+          "LTI_AUTH_URL",
+          "LTI_JWKS_URL"
+        ],
+        "status": "Five values saved, read back and exactly verified; Preview redeployment READY"
+      }
+    },
+    "accountAccess": {
+      "status": "Administrator role granted to the two requested existing accounts (user IDs 1 and 2); includes teacher access",
+      "database": "wpyoflavoquuzswqicwk"
+    },
+    "fixes": {
+      "patient": "Use native Node.js 22 fetch instead of bundling node-fetch through Gemini; avoids dynamic require stream initialization failure",
+      "ltiAdmin": "Pass existing database admin role through launch and route admin/teacher to teacher dashboard; authorization stays database controlled",
+      "status": "Validated: full client/server build passes; compiled patient service imports and validates requests without node-fetch runtime failure. TypeScript baseline and changed revision both report the same 97 pre-existing errors."
+    }
+  }
+}
