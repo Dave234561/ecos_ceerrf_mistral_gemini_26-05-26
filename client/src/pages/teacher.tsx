@@ -447,28 +447,6 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
     checkUserRole();
   }, [user, propsEmail]);
 
-  // Show error if no email is available
-  if (!email) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-neutral-50">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="text-red-600">Erreur d'authentification</CardTitle>
-            <CardDescription>
-              Impossible de charger votre profil enseignant. Veuillez vous connecter.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => window.location.href = '/login'} className="w-full">
-              Se connecter
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-
   const { data: dashboardData, error: dashboardError, isLoading: isDashboardLoading } = useDashboardData(email || '');
   const { data: teacherScenarios, error: scenariosError, isLoading: isScenariosLoading } = useTeacherScenarios(email || '');
   const { data: assignedStudents, isLoading: isStudentsLoading } = useTeacherStudents(email || '');
