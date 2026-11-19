@@ -79,7 +79,7 @@
     "authIssue": "Firebase auth/unauthorized-domain corrected; both exact deployment and stable feature/lti domains verified in Firebase API",
     "stablePreviewDomain": "ecos-ceerrf-mistral-gemini-26-0-git-40e520-dave234561s-projects.vercel.app",
     "vercelSupabaseConfiguration": "Five Supabase variables updated in existing Production/Preview/Development targets; obsolete DATABASE_URL removed. Only feature/lti Preview redeployed; main not merged or redeployed.",
-    "databaseUrlStatus": "Removed obsolete DATABASE_URL from Vercel. Active server/db.ts and serverless routes exclusively use UnifiedDatabaseService via Supabase REST. No active imports of legacy connection-pool/replitAuth.",
+    "databaseUrlSt/atus": "Removed obsolete DATABASE_URL from Vercel. Active server/db.ts and serverless routes exclusively use UnifiedDatabaseService via Supabase REST. No active imports of legacy connection-pool/replitAuth.",
     "scenarios": "Imported real scenarios 1, 4, 5 and their existing author reference; no students, sessions or results copied",
     "deployment": "dpl_8CY113tamHuN2w7eCAMPcrUvuzCY READY; feature/lti Preview only",
     "verification": {
