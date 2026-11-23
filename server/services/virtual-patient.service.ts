@@ -9,6 +9,7 @@
  */
 
 import { llmService } from './llm.service.js';
+import { EmptyPatientResponseError } from './mistral.service.js';
 import { conversationMemoryService } from './conversation-memory.service.js';
 import { unifiedDb } from './unified-database.service.js';
 import { emotionalStateService } from './emotional-state.service.js';
@@ -120,6 +121,7 @@ export class VirtualPatientService {
       // Generate AI response with scenario-specific initial message
       const aiResponse = await this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId);
       const cleanedResponse = this.sanitizePatientResponse(aiResponse);
+      if (!cleanedResponse) throw new EmptyPatientResponseError('No visible patient response after sanitization');
 
       // Update emotional state if enabled for this scenario
       if (emotionalStateEnabled && context.emotionalState) {
@@ -162,6 +164,7 @@ export class VirtualPatientService {
       };
 
     } catch (error) {
+      if (error instanceof EmptyPatientResponseError) throw error;
       console.error('❌ Error generating patient response:', error);
       
       // Fallback response

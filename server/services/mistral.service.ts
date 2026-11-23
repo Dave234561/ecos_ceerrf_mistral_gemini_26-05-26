@@ -1,5 +1,7 @@
 import { Mistral } from '@mistralai/mistralai';
 
+export class EmptyPatientResponseError extends Error {}
+
 export class MistralService {
   private client: Mistral;
   private model: string;
@@ -22,7 +24,14 @@ export class MistralService {
       messages: mappedMessages,
       ...options
     });
-    return typeof response.choices[0]?.message?.content === 'string' ? response.choices[0].message.content : '';
+    const content = response.choices?.[0]?.message?.content;
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((chunk) => chunk.type === 'text' ? chunk.text : '').join('')
+        : '';
+    if (!text.trim()) throw new EmptyPatientResponseError('No visible model response text');
+    return text;
   }
 }
 

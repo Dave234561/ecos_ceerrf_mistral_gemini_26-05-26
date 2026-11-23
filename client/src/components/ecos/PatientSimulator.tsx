@@ -812,6 +812,12 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
               message="Le patient réfléchit…"
               showQueueStatus={true}
             />
+            {sendMessageMutation.isError &&
+              /"code"\s*:\s*"AI_PATIENT_EMPTY_RESPONSE"/.test(sendMessageMutation.error?.message ?? '') && (
+                <p role="alert" className="mt-2 text-sm text-destructive">
+                  Le patient n’a renvoyé aucun texte. Votre question est conservée : vous pouvez la reformuler ou réessayer.
+                </p>
+              )}
             {isPatientWaiting && (
               <div className="text-sm text-primary animate-pulse flex items-center justify-center mt-2">
                 <span className="material-icons text-sm mr-1">hourglass_empty</span>

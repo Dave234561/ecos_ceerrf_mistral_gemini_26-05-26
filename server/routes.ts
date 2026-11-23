@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { users, ecosScenarios, ecosSessions, ecosMessages, ecosEvaluations, trainingSessions, trainingSessionStudents, trainingSessionScenarios } from '../shared/schema.js';
 import { unifiedDb } from './services/unified-database.service.js';
+import { EmptyPatientResponseError } from './services/mistral.service.js';
 import { eq, and } from 'drizzle-orm';
 import { scenarioSyncService } from './services/scenario-sync.service.js';
 import {
@@ -3377,6 +3378,9 @@ Format JSON attendu :
       });
 
     } catch (error: any) {
+      if (error instanceof EmptyPatientResponseError) {
+        return res.status(422).json({ code: 'AI_PATIENT_EMPTY_RESPONSE' });
+      }
       console.error('❌ Error in AI patient simulator:', error);
       res.status(500).json({
         error: 'Failed to generate AI patient response',
