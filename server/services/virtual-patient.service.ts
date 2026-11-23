@@ -9,6 +9,7 @@
  */
 
 import { llmService } from './llm.service.js';
+import { timedPatientPhase, patientTimingError } from './patient-timing.js';
 import { EmptyPatientResponseError } from './mistral.service.js';
 import { conversationMemoryService } from './conversation-memory.service.js';
 import { unifiedDb } from './unified-database.service.js';
@@ -54,23 +55,7 @@ export class VirtualPatientService {
     query: string,
     scenarioId?: number
   ): Promise<PatientResponse> {
-    console.log(`🚀 [generatePatientResponse] Starting patient response generation:`, {
-      sessionId,
-      studentEmail,
-      scenarioId,
-      queryPreview: query.substring(0, 50) + '...'
-    });
-    
     try {
-      // Debug: Log scenarioId type and value
-      console.log(`🎭 [generatePatientResponse] scenarioId type check:`, {
-        scenarioId,
-        type: typeof scenarioId,
-        isNumber: typeof scenarioId === 'number',
-        isString: typeof scenarioId === 'string',
-        value: scenarioId
-      });
-
       // Check if scenario supports emotional state tracking
       const emotionalStateEnabled = emotionalStateService.isEmotionalStateEnabled(scenarioId || 1);
       console.log(`🎭 [generatePatientResponse] Emotional state system status:`, {
@@ -90,13 +75,13 @@ export class VirtualPatientService {
       }
 
       // Initialize or get conversation memory
-      const memory = await conversationMemoryService.initializeConversation(
+      const memory = await timedPatientPhase('conversation_memory', () => conversationMemoryService.initializeConversation(
         sessionId,
         studentEmail,
         scenarioId || 1,
         undefined, // patientPrompt
         initialEmotionalState
-      );
+      ));
 
       // Detect and update student role from query
       conversationMemoryService.updateStudentRole(sessionId, query);
@@ -119,9 +104,12 @@ export class VirtualPatientService {
       const conversationMessages = conversationMemoryService.getConversationMessages(sessionId, 8);
 
       // Generate AI response with scenario-specific initial message
-      const aiResponse = await this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId);
-      const cleanedResponse = this.sanitizePatientResponse(aiResponse);
-      if (!cleanedResponse) throw new EmptyPatientResponseError('No visible patient response after sanitization');
+      const aiResponse = await timedPatientPhase('generation', () => this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId));
+      const cleanedResponse = await timedPatientPhase('patient_normalization', () => {
+        const cleaned = this.sanitizePatientResponse(aiResponse);
+        if (!cleaned) throw new EmptyPatientResponseError('No visible patient response after sanitization');
+        return cleaned;
+      });
 
       // Update emotional state if enabled for this scenario
       if (emotionalStateEnabled && context.emotionalState) {
@@ -165,17 +153,15 @@ export class VirtualPatientService {
 
     } catch (error) {
       if (error instanceof EmptyPatientResponseError) throw error;
-      console.error('❌ Error generating patient response:', error);
+      patientTimingError('patient_fallback', error);
       
       // Fallback response
       const addressing = conversationMemoryService.getStudentAddressing(sessionId);
-      const fallbackMessage =
-        error instanceof Error ? error.message : 'Unknown error generating patient response';
 
       return {
         response: `Excusez-moi ${addressing || ''}, pourriez-vous répéter votre question ? Je n'ai pas bien compris.`,
         addressing: addressing || 'étudiant',
-        message: `AI patient fallback response due to error: ${fallbackMessage}`
+        message: 'AI patient fallback response'
       };
     }
   }
@@ -193,7 +179,7 @@ export class VirtualPatientService {
 
     try {
       console.log(`🔄 [getScenarioPatientPrompt] Fetching scenarios from database...`);
-      const scenarios = await unifiedDb.getScenarios();
+      const scenarios = await timedPatientPhase('scenario_prompt_fetch', () => unifiedDb.getScenarios());
       console.log(`📊 [getScenarioPatientPrompt] Found ${scenarios.length} scenarios in database`);
 
       const parsedScenarioId =
@@ -214,22 +200,19 @@ export class VirtualPatientService {
       
       if (scenario?.patient_prompt && scenario.patient_prompt.trim()) {
         console.log(`✅ [getScenarioPatientPrompt] Using scenario-specific prompt for scenario ${normalizedScenarioId ?? scenarioId}`);
-        console.log(`📝 [getScenarioPatientPrompt] Prompt preview: "${scenario.patient_prompt.substring(0, 100)}..."`);
         return scenario.patient_prompt;
       }
       
       if (scenario) {
-        console.warn(`⚠️ [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} exists but has no patient_prompt (${scenario.patient_prompt})`);
+        console.warn(`⚠️ [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} exists but has no patient_prompt`);
       } else {
         console.warn(`⚠️ [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} not found in database`);
-        console.log(`📋 [getScenarioPatientPrompt] Available scenario IDs:`, scenarios.map(s => s.id));
       }
       
       console.warn(`⚠️ [getScenarioPatientPrompt] Using fallback prompt for scenario ${scenarioId}`);
       return this.getDefaultPatientPrompt();
       
     } catch (error) {
-      console.error('❌ [getScenarioPatientPrompt] Error fetching scenario prompt:', error);
       console.warn('⚠️ [getScenarioPatientPrompt] Using emergency fallback prompt due to database error');
       return this.getDefaultPatientPrompt();
     }

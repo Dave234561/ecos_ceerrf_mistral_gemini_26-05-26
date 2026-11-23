@@ -1,3 +1,4 @@
+import { patientTiming, timedPatientPhase, patientTimingError } from './services/patient-timing.js';
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
@@ -3230,7 +3231,7 @@ Format JSON attendu :
 
   // AI-powered virtual patient simulator with memory and role recognition
   // 🔒 SECURED: Requires student authentication via Firebase token
-  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), async (req: FirebaseAuthRequest, res: Response) => {
+  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), patientTiming, async (req: FirebaseAuthRequest, res: Response) => {
     try {
       // SECURITY: Email retrieved from verified Firebase token (NOT from body)
       const email = req.firebaseUser!.email;
@@ -3241,9 +3242,6 @@ Format JSON attendu :
 
       if (!resolvedScenarioId && sessionId) {
         resolvedScenarioId = extractScenarioIdFromSessionId(sessionId);
-        if (resolvedScenarioId) {
-          console.log(`🔄 [patient-simulator] Extracted scenarioId ${resolvedScenarioId} from sessionId: ${sessionId}`);
-        }
       }
 
       // Convert scenarioId to number if it's a string (CRITICAL for emotional state system)
@@ -3254,21 +3252,8 @@ Format JSON attendu :
 
         if (!isNaN(numericScenarioId)) {
           resolvedScenarioId = numericScenarioId;
-          console.log(`✅ [patient-simulator] Converted scenarioId to number:`, numericScenarioId);
         }
       }
-
-      console.log('🔄 [patient-simulator] Received request:', {
-        email,
-        sessionId,
-        providedScenarioId,
-        resolvedScenarioId,
-        hasQuery: !!query,
-        queryLength: query?.length || 0,
-        scenarioIdType: typeof resolvedScenarioId,
-        scenarioIdValue: resolvedScenarioId,
-        extractionUsed: !providedScenarioId && !!resolvedScenarioId
-      });
 
       // Import services
       const { virtualPatientService } = await import('./services/virtual-patient.service.js');
@@ -3288,16 +3273,10 @@ Format JSON attendu :
         });
       }
 
-      console.log(`🤖 AI Patient simulator query from ${email} in session ${sessionId}:`, {
-        query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
-        resolvedScenarioId,
-        extractionUsed: !providedScenarioId && !!resolvedScenarioId
-      });
-
       // Validate scenario exists before processing
       if (resolvedScenarioId) {
         try {
-          const scenarios = await unifiedDb.getScenarios();
+          const scenarios = await timedPatientPhase('scenario_validation', () => unifiedDb.getScenarios());
           const scenario = scenarios.find(s => s.id === parseInt(resolvedScenarioId.toString(), 10));
           if (!scenario) {
             return res.status(404).json({
@@ -3305,9 +3284,7 @@ Format JSON attendu :
               code: 'SCENARIO_NOT_FOUND'
             });
           }
-          console.log(`✅ Using scenario: "${scenario.title}" (ID: ${resolvedScenarioId}) ${!providedScenarioId ? '[EXTRACTED from sessionId]' : '[PROVIDED directly]'}`);
         } catch (error) {
-          console.error('❌ Error validating scenario:', error);
           return res.status(500).json({
             error: 'Failed to validate scenario',
             code: 'SCENARIO_VALIDATION_FAILED'
@@ -3315,14 +3292,6 @@ Format JSON attendu :
         }
       }
 
-      // Warning if no scenarioId could be resolved
-      if (!resolvedScenarioId) {
-        console.warn('⚠️ [patient-simulator] No scenarioId provided or extractable - patient will use generic fallback prompt instead of scenario-specific prompt');
-        console.warn('⚠️ [patient-simulator] SessionId pattern for extraction:', sessionId);
-      }
-
-      // Generate AI-powered patient response with memory and role awareness
-      console.log(`🚀 [patient-simulator] Calling virtualPatientService.generatePatientResponse with resolved scenarioId: ${resolvedScenarioId}`);
       const patientResponse = await virtualPatientService.generatePatientResponse(
         sessionId,
         email,
@@ -3332,39 +3301,36 @@ Format JSON attendu :
 
       // Store conversation in database
       try {
-        // Store user message
-        await unifiedDb.storeSessionMessage({
-          sessionId,
-          role: 'user',
-          question: query,
-          response: ''
+        await timedPatientPhase('persistence', async () => {
+          await unifiedDb.storeSessionMessage({
+            sessionId,
+            role: 'user',
+            question: query,
+            response: ''
+          });
+          await unifiedDb.storeSessionMessage({
+            sessionId,
+            role: 'assistant',
+            question: '',
+            response: patientResponse.response,
+            content: patientResponse.response
+          });
         });
-
-        // Store assistant response
-        await unifiedDb.storeSessionMessage({
-          sessionId,
-          role: 'assistant',
-          question: '',
-          response: patientResponse.response,
-          content: patientResponse.response
-        });
-
-        console.log('✅ Stored user message and assistant response for session:', sessionId);
 
         // Trigger real-time analysis for teacher dashboard
         try {
-          const { realtimeAnalysisService } = await import('./services/realtime-analysis.service.js');
+          const { realtimeAnalysisService } = await timedPatientPhase('analysis_dispatch', () => import('./services/realtime-analysis.service.js'));
           // Fire and forget - don't await to avoid slowing down response
           realtimeAnalysisService.analyzeSessionProgress(sessionId, {
             sessionStatus: 'in_progress'
           }).catch(err => {
-            console.warn('⚠️ Real-time analysis failed (non-blocking):', err.message);
+            patientTimingError('analysis_dispatch', err);
           });
         } catch (analysisError) {
-          console.warn('⚠️ Failed to trigger real-time analysis:', analysisError);
+          // The timed import already recorded the error class.
         }
       } catch (storageError) {
-        console.warn('⚠️ Failed to store conversation messages:', storageError);
+        // The persistence phase already recorded the error class.
         // Continue - storage failure shouldn't break patient simulator
       }
 
@@ -3377,15 +3343,14 @@ Format JSON attendu :
         message: 'AI patient response generated with memory and role awareness'
       });
 
-    } catch (error: any) {
+    } catch (error) {
       if (error instanceof EmptyPatientResponseError) {
         return res.status(422).json({ code: 'AI_PATIENT_EMPTY_RESPONSE' });
       }
-      console.error('❌ Error in AI patient simulator:', error);
+      patientTimingError('route', error);
       res.status(500).json({
         error: 'Failed to generate AI patient response',
-        code: 'AI_PATIENT_SIMULATOR_FAILED',
-        details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        code: 'AI_PATIENT_SIMULATOR_FAILED'
       });
     }
   });
