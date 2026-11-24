@@ -144,6 +144,7 @@ export function buildPatientPilotCase(prompt: string): PatientCase {
     refineMatches(question, matchedIds) {
       const matches = new Set(matchedIds);
       const query = words(question);
+      if (/ un cote /.test(query) && / (oreille|oreilles|auriculaire) /.test(query)) matches.add('earLaterality');
       const asksDuration = / (depuis quand|depuis combien|ca fait combien|duree|depuis (hier|avant hier|\d+|[a-z]+ jours?)) /.test(query);
       if (matches.has('fever') && matches.has('temperature') && !asksDuration) matches.delete('fever');
       if (matches.has('ears') && asksDuration && / (depuis quand|depuis combien|quand a t il commence) /.test(query) &&
@@ -154,7 +155,7 @@ export function buildPatientPilotCase(prompt: string): PatientCase {
         const asksRubbing = question.split(/[?;.!]|\bet\s+(?:est-ce|avez-vous|est ce|vous l)/i).some(clause => {
           const part = words(clause);
           return / (frotte|frotter|touche|toucher) /.test(part) &&
-            !/ (depuis quand|depuis combien|quand|commence|quelle oreille|en particulier|les deux|gauche|droite|quel cote|ecoulement) /.test(part) &&
+            !/ (depuis quand|depuis combien|quand|commence|quelle oreille|en particulier|les deux|gauche|droite|quel cote|un cote|ecoulement) /.test(part) &&
             / (est ce|avez vous|vous l avez|se frotte t il|il se frotte|a t il) /.test(part);
         });
         if (!asksRubbing) matches.delete('ears');

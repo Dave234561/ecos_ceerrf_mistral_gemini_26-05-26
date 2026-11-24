@@ -92,6 +92,12 @@ test('pilot compounds preserve verified duration and distinguish the three unkno
   assert.match(ears, /quand cela a commencé/);
   assert.match(ears, /écoulement/);
   assert.doesNotMatch(ears, /témoin/);
+  const observed = reply('Depuis quand se frotte-t-il les oreilles, et avez-vous remarqué un côté ou un écoulement ?');
+  assert.match(observed, /de quel côté/);
+  assert.match(observed, /quand cela a commencé/);
+  assert.match(observed, /écoulement/);
+  assert.doesNotMatch(observed, /témoin/);
+  assert.equal(reply('Vous avez remarqué un côté ?'), pilot.clarify);
   assert.doesNotMatch(reply('Vous l’avez vu se frotter une oreille en particulier, ou les deux ? Avez-vous observé un écoulement ?'), /témoin/);
   assert.match(reply('Est-ce qu’il se frotte les oreilles ? Et quelle oreille ?'), /témoin.*de quel côté/);
   assert.match(reply('Il n’a pas vomi ?'), /n’a pas vomi/);
