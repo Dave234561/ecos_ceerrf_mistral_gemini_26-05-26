@@ -15,7 +15,8 @@ export class MistralService {
     const patientHttpClient = new HTTPClient().addHook('beforeRequest', async (request) => {
       if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/chat/completions') return request;
       const payload = await request.clone().json() as Record<string, unknown>;
-      const body = JSON.stringify({ ...payload, reasoning_effort: 'none' });
+      const reasoningEffort = process.env.VERCEL_ENV === 'preview' ? 'high' : 'none';
+      const body = JSON.stringify({ ...payload, reasoning_effort: reasoningEffort });
       const headers = new Headers(request.headers);
       headers.delete('content-length');
       return new Request(request, { body, headers });
