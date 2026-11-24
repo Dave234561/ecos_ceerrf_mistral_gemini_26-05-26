@@ -52,3 +52,28 @@ test('tone changes with agitation but not facts; arbitrary case revisions are re
   assert.equal(projectPatientPilot(4, 'synthetic draft'), undefined);
   assert.equal(projectPatientPilot(5, 'synthetic draft'), undefined);
 });
+
+test('separately answers timeline and dose, without volunteering timeline when only dose is asked', () => {
+  for (const q of ['Vous avez repris le traitement hier, et à quelle dose ?', 'Quand avez-vous repris le traitement ? Quelle dose ?']) {
+    assert.match(ask(4, q).text, /sept jours.*ne peux pas préciser le nom ou la dose/i);
+  }
+  for (const q of ['Quelle dose du traitement repris hier ?', 'À quelle dose avez-vous repris votre traitement ?']) {
+    assert.equal(ask(4, q).state, 'unknown');
+    assert.doesNotMatch(ask(4, q).text, /sept jours/);
+  }
+});
+
+test('separates fever symptoms from measurements and recognizes temporal inversion', () => {
+  for (const q of ['Avez-vous de la fièvre et quelle température avez-vous mesurée ?', 'Avez-vous eu des frissons ? Quel résultat montre le thermomètre ?']) {
+    assert.match(ask(5, q).text, /fièvre.*frissons.*ne peux pas donner ce résultat/i);
+  }
+  for (const q of ['Votre fièvre était de combien de degrés ?', 'Quelle température avez-vous mesurée quand vous aviez de la fièvre ?']) {
+    assert.equal(ask(5, q).state, 'unknown');
+    assert.doesNotMatch(ask(5, q).text, /J’ai de la fièvre/);
+  }
+  assert.doesNotMatch(ask(5, 'Le traitement a-t-il commencé ce matin ?').text, /hier/);
+  for (const q of ['Les symptômes ont-ils commencé ce matin ?', 'Les signes ont commencé ce matin ?', 'Les signes ont-ils commencé ce soir ?']) {
+    assert.match(ask(5, q).text, /hier/);
+  }
+  assert.doesNotMatch(ask(5, 'Quel est le barème pour les symptômes qui ont commencé ce matin ?').text, /hier/);
+});

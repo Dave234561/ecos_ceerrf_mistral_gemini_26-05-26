@@ -10,6 +10,14 @@ const slot = (id: string, topics: readonly string[], text: string, state: Slot['
   ({ id, topics, answer: { state, text } });
 const unknown = (id: string, topics: readonly string[], text: string): Slot => slot(id, topics, text, 'unknown');
 
+function normalizedQuestion(question: string): string {
+  return question.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function askedSeparately(question: string, intent: RegExp): boolean {
+  return question.split(/[?;.!]|\bet\b/i).some(clause => intent.test(normalizedQuestion(clause)));
+}
+
 export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
   4: {
     ...adultSources[4],
@@ -29,8 +37,16 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       slot('belly', ['ventre', 'abdominal', 'abdominale', 'digestif', 'digestive'], 'Je n’ai pas mal au ventre.', 'negative'),
       unknown('clinical', ['diagnostic', 'schizophrénie', 'psychose', 'constantes', 'tension artérielle', 'examen clinique'], 'Je ne peux pas vous dire ça.'),
     ],
-    allowedCombinations: [['sleep', 'medication'], ['phone', 'age'], ['voices', 'mistrust']],
-    suppressWhenPresent: { medication: 'medicationDetail', voices: 'voiceDetails' },
+    allowedCombinations: [['sleep', 'medication'], ['phone', 'age'], ['voices', 'mistrust'], ['medication', 'medicationDetail']],
+    suppressWhenPresent: { voices: 'voiceDetails' },
+    refineMatches(question, matchedIds) {
+      if (!matchedIds.has('medicationDetail') || !matchedIds.has('medication')) return matchedIds;
+      const askedTimeline = askedSeparately(question, /^(?:(?:quand|depuis quand|il y a combien de temps) )?(?:vous avez|avez vous|vous l avez|l avez vous) (?:repri[st]?|arrete)\b(?!.*\b(?:dose|posologie|comprime)\b)/);
+      if (askedTimeline) return matchedIds;
+      const matches = new Set(matchedIds);
+      matches.delete('medication');
+      return matches;
+    },
   },
   5: {
     ...adultSources[5],
@@ -57,23 +73,30 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       unknown('clinical', ['diagnostic', 'saturation', 'fréquence respiratoire', 'fréquence cardiaque', 'tension', 'glycémie', 'thermomètre', 'degrés', 'mesurée', 'chiffres', 'examen'], 'Je ne peux pas donner ce résultat.'),
     ],
     allowedCombinations: [
-      ['onset', 'sequence'], ['onset', 'clinical'], ['onset', 'fever'], ['onset', 'breathing'], ['onset', 'heart'],
+      ['onset', 'sequence'], ['onset', 'clinical'], ['fever', 'clinical'], ['onset', 'fever'], ['onset', 'breathing'], ['onset', 'heart'],
       ['onset', 'fatigue'], ['fever', 'breathing'], ['breathing', 'heart'], ['breathing', 'fatigue'],
       ['thirst', 'intake'], ['thirst', 'urine'], ['intake', 'urine'], ['thirst', 'intake', 'urine'],
     ],
     suppressWhenPresent: {
-      fever: 'clinical', breathing: 'clinical', heart: 'clinical',
+      breathing: 'clinical', heart: 'clinical',
     },
     refineMatches(question, matchedIds) {
-      const q = question.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+      const q = normalizedQuestion(question);
+      const matches = new Set(matchedIds);
+      if (/\b(?:les )?(?:symptomes|signes) ont ils commence (?:ce matin|cet apres midi|ce soir|hier|il y a)\b/.test(q)) {
+        matches.add('onset');
+      }
+      if (matches.has('fever') && matches.has('clinical') &&
+          !askedSeparately(question, /^(?:(?:est ce que|est ce qu) )?(?:vous avez|avez vous|vous avez eu|avez vous eu|ressentez vous) (?:de la |une |des )?(?:fievre|frissons)\b(?!.*\b(?:mesur|temperature|thermometre|degres)\w*\b)/)) {
+        matches.delete('fever');
+      }
       const symptomIds = ['fever', 'heart', 'breathing', 'fatigue', 'confusion', 'thirst'];
-      const symptomCount = symptomIds.filter(id => matchedIds.has(id)).length;
-      const impliedOrder = (symptomCount > 1 || (symptomCount > 0 && matchedIds.has('onset'))) &&
+      const symptomCount = symptomIds.filter(id => matches.has(id)).length;
+      const impliedOrder = (symptomCount > 1 || (symptomCount > 0 && matches.has('onset'))) &&
         /\bd abord\b.{1,120}\b(puis|ensuite)\b/.test(q);
-      if (!matchedIds.has('sequence') && !impliedOrder) return matchedIds;
+      if (!matches.has('sequence') && !impliedOrder) return matches;
       // Named symptoms used as candidates for chronology are not confirmation
       // questions. Keep requested onset, but never assign an order by echo.
-      const matches = new Set(matchedIds);
       matches.add('sequence');
       for (const id of symptomIds) matches.delete(id);
       return matches;
