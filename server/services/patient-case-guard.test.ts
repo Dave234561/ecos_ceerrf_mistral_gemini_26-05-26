@@ -49,3 +49,29 @@ test('conditional facts require a server-confirmed disclosure in this conversati
   assert.equal(resolvePatientCaseReply(fixture, 'Quel est le contenu ?', revealed).text, 'Il y a une fiche.');
   assert.equal(resolvePatientCaseReply(fixture, 'Quel est le contenu ?', new Set()).state, 'withheld');
 });
+
+test('reviews bounded combinations and prioritizes explicitly asked unknown detail', () => {
+  const safe: PatientCase = {
+    ...fixture,
+    allowedCombinations: [['color', 'owner']],
+    suppressWhenPresent: { sticker: 'owner' },
+  };
+  const reply = (question: string) => resolvePatientCaseReply(safe, question, new Set());
+  assert.equal(reply('Quelle couleur et quel propriétaire ?').text,
+    'Il est vert. Je ne sais pas à qui il appartient.');
+  assert.equal(reply('Autocollant du propriétaire ?').state, 'unknown');
+  assert.equal(reply('Quelle couleur et quel autocollant ?').state, 'clarify');
+  assert.equal(reply('Quel barème pour la couleur ?').text, safe.clarify);
+});
+
+test('prefixes an explicit contradiction, not a normal confirmation', () => {
+  const safe: PatientCase = {
+    ...fixture,
+    slots: fixture.slots.map(slot => slot.id === 'color'
+      ? { ...slot, correctsPremise: q => q.includes(' couleur bleue ') }
+      : slot),
+  };
+  const reply = (q: string) => resolvePatientCaseReply(safe, q, new Set()).text;
+  assert.equal(reply('Couleur bleue ?'), 'Non, il est vert.');
+  assert.equal(reply('Couleur verte ?'), 'Il est vert.');
+});
