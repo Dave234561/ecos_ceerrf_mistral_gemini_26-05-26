@@ -1,5 +1,5 @@
 import { Mistral } from '@mistralai/mistralai';
-import { timedPatientPhase } from './patient-timing.js';
+import { logMistralCompletion, timedPatientPhase } from './patient-timing.js';
 
 export class EmptyPatientResponseError extends Error {}
 
@@ -26,8 +26,10 @@ export class MistralService {
       temperature: options.temperature,
       ...(options.max_tokens !== undefined ? { maxTokens: options.max_tokens } : {})
     }), this.model);
+    const choice = response.choices?.[0];
+    const content = choice?.message?.content;
+    logMistralCompletion(choice?.finishReason, response.usage, content);
     return timedPatientPhase('provider_normalization', () => {
-      const content = response.choices?.[0]?.message?.content;
       const text = typeof content === 'string'
         ? content
         : Array.isArray(content)

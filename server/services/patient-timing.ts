@@ -76,3 +76,31 @@ export function patientTimingError(phase: Phase, error: unknown): void {
   const trace = context.getStore();
   if (trace) log(trace, phase, 'error', performance.now(), undefined, error);
 }
+
+const mistralFinishReasons = ['stop', 'length', 'model_length', 'error', 'tool_calls'];
+
+function safeCount(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+export function logMistralCompletion(
+  finishReason: string | undefined,
+  usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined,
+  content: string | readonly { type: string }[] | null | undefined,
+): void {
+  const trace = context.getStore();
+  if (!trace) return;
+  const chunks = Array.isArray(content) ? content : undefined;
+  console.info(JSON.stringify({
+    event: 'ecos.patient.mistral_completion',
+    trace_id: trace.id,
+    finish_reason: finishReason === undefined ? 'missing' : mistralFinishReasons.includes(finishReason) ? finishReason : 'other',
+    prompt_tokens: safeCount(usage?.promptTokens),
+    completion_tokens: safeCount(usage?.completionTokens),
+    total_tokens: safeCount(usage?.totalTokens),
+    content_shape: chunks ? 'chunks' : typeof content === 'string' ? 'string' : 'missing',
+    chunk_count: chunks?.length,
+    text_chunk_count: chunks?.filter(chunk => chunk.type === 'text').length,
+    thinking_chunk_count: chunks?.filter(chunk => chunk.type === 'thinking').length,
+  }));
+}
