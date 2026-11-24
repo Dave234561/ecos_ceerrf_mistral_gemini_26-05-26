@@ -21,6 +21,7 @@ export type PatientCase = {
   slots: readonly Slot[];
   allowedCombinations?: readonly (readonly string[])[];
   suppressWhenPresent?: Readonly<Record<string, string>>;
+  refineMatches?: (question: string, matchedIds: ReadonlySet<string>) => ReadonlySet<string>;
 };
 export class VerifiedPatientScenarioUnavailableError extends Error {}
 
@@ -66,9 +67,10 @@ export function resolvePatientCaseReply(
     return { text: patientCase.clarify, state: 'clarify' };
   }
   const matchedIds = new Set(candidates.map(slot => slot.id));
-  candidates = candidates.filter(slot => {
+  const refined = patientCase.refineMatches?.(question, matchedIds) ?? matchedIds;
+  candidates = patientCase.slots.filter(slot => {
     const preferred = patientCase.suppressWhenPresent?.[slot.id];
-    return !preferred || !matchedIds.has(preferred);
+    return refined.has(slot.id) && (!preferred || !refined.has(preferred));
   });
   if (!candidates.length || (candidates.length > 1 && !patientCase.allowedCombinations?.some(combo =>
     combo.length === candidates.length && candidates.every(slot => combo.includes(slot.id))))) {
@@ -102,7 +104,11 @@ export function shouldUsePatientPilot(scenarioId: number | undefined, vercelEnv:
  * A new revision must be reviewed with the educator; never guess new offsets.
  */
 export function projectPatientPilot(scenarioId: number | undefined, prompt: string): PatientCase | undefined {
-  if (!matchesPatientSource(PILOT_SOURCE, scenarioId, prompt)) return undefined;
+  return matchesPatientSource(PILOT_SOURCE, scenarioId, prompt) ? buildPatientPilotCase(prompt) : undefined;
+}
+
+// Only projectPatientPilot installs this in the runtime. Exported for synthetic tests.
+export function buildPatientPilotCase(prompt: string): PatientCase {
   const lines = prompt.split('\n');
   const fragment = (line: number, from: number, to?: number) => lines[line].slice(from, to).trim();
   const known = (id: string, topics: readonly string[], text: string, correctsPremise?: Slot['correctsPremise']): Slot =>
@@ -122,16 +128,39 @@ export function projectPatientPilot(scenarioId: number | undefined, prompt: stri
     return typeof claimed === 'number' && claimed !== authoredDays;
   };
 
+  const earDetails = ['earOnset', 'earLaterality', 'earDischarge'];
   return {
     ...PILOT_SOURCE,
     opening: `Bonjour. Je suis la ${fragment(0, 9, 19)} et je suis inquiète.`,
     clarify: 'Pouvez-vous me poser une question plus précise ?',
     allowedCombinations: [
-      ['fever', 'earOnset'], ['fever', 'hydration'],
-      ['earLaterality', 'earDischarge'], ['ears', 'earLaterality'], ['ears', 'earDischarge'],
-      ['ears', 'earLaterality', 'earDischarge'],
+      ['fever', 'earOnset'], ['fever', 'hydration'], ['fever', 'temperature'],
+      ['earOnset', 'earLaterality'], ['earOnset', 'earDischarge'], ['earLaterality', 'earDischarge'], earDetails,
+      ...earDetails.map(detail => ['ears', detail]),
+      ['ears', 'earOnset', 'earLaterality'], ['ears', 'earOnset', 'earDischarge'],
+      ['ears', 'earLaterality', 'earDischarge'], ['ears', ...earDetails],
     ],
-    suppressWhenPresent: { medicine: 'dose', fever: 'temperature' },
+    suppressWhenPresent: { medicine: 'dose' },
+    refineMatches(question, matchedIds) {
+      const matches = new Set(matchedIds);
+      const query = words(question);
+      const asksDuration = / (depuis quand|depuis combien|ca fait combien|duree|depuis (hier|avant hier|\d+|[a-z]+ jours?)) /.test(query);
+      if (matches.has('fever') && matches.has('temperature') && !asksDuration) matches.delete('fever');
+      if (matches.has('ears') && asksDuration && / (depuis quand|depuis combien|quand a t il commence) /.test(query) &&
+          !/ (fievre|febrile|temperature) /.test(query)) matches.add('earOnset');
+      if (matches.has('ears') && earDetails.some(id => matches.has(id))) {
+        // Asking when/which side he rubbed is not asking whether rubbing occurred.
+        // Only a separate, direct yes/no clause licenses that authored fact.
+        const asksRubbing = question.split(/[?;.!]|\bet\s+(?:est-ce|avez-vous|est ce|vous l)/i).some(clause => {
+          const part = words(clause);
+          return / (frotte|frotter|touche|toucher) /.test(part) &&
+            !/ (depuis quand|depuis combien|quand|commence|quelle oreille|en particulier|les deux|gauche|droite|quel cote|ecoulement) /.test(part) &&
+            / (est ce|avez vous|vous l avez|se frotte t il|il se frotte|a t il) /.test(part);
+        });
+        if (!asksRubbing) matches.delete('ears');
+      }
+      return matches;
+    },
     slots: [
       known('identity', ['qui êtes vous', 'comment il s appelle', 'prénom', 'âge', 'combien de mois'], `Je suis la ${fragment(0, 9, 19)}. Il a ${fragment(0, 34, 49)}.`),
       known('fever', ['fièvre', 'fébrile', 'depuis combien de jours', 'depuis quand a t il de la fièvre', 'raison de votre venue', 'qu est ce qui vous amène', 'pourquoi êtes vous venue', 'qu est ce qui vous inquiète', 'vous inquiète le plus'], `Il a de la fièvre depuis ${duration}. Elle est forte.`, conflictsWithFeverDuration),
@@ -143,9 +172,9 @@ export function projectPatientPilot(scenarioId: number | undefined, prompt: stri
       negative('history', ['antécédent', 'antécédents', 'opéré', 'opération', 'chirurgical', 'chirurgicaux'], `Il n’a pas d’${fragment(6, 13, 49)}.`),
       known('vaccines', ['vaccins', 'vaccin', 'vaccination', 'vacciné'], `Ses ${fragment(6, 51, 58)} sont ${fragment(6, 59, 66)}`),
       known('medicine', ['doliprane', 'paracétamol', 'médicament', 'traitement donné'], `Je lui ai donné du ${fragment(7, 15, 24)}${fragment(7, 24, 46)}`),
-      unknown('temperature', ['température', 'combien de degrés', 'thermomètre']),
-      unknown('earLaterality', ['oreille droite', 'oreille gauche', 'quelle oreille', 'une oreille en particulier', 'les deux oreilles'], 'Je ne peux pas préciser de quel côté.'),
-      unknown('earOnset', ['depuis quand a t il mal', 'depuis quand semble t il avoir mal', 'quand a t il commencé à avoir mal à l oreille'], 'Je ne peux pas dire depuis quand il semble avoir mal à l’oreille.'),
+      unknown('temperature', ['température', 'combien de degrés', 'thermomètre', 'mesuré sa fièvre'], 'Je ne peux pas vous donner de température mesurée.'),
+      unknown('earLaterality', ['oreille droite', 'oreille gauche', 'quelle oreille', 'une oreille en particulier', 'les deux oreilles', 'quel côté', 'd un côté', 'une oreille ou les deux', 'laquelle', 'à gauche', 'à droite'], 'Je ne peux pas préciser de quel côté.'),
+      unknown('earOnset', ['depuis quand a t il mal', 'depuis quand semble t il avoir mal', 'quand a t il commencé à avoir mal à l oreille', 'depuis quand se frotte t il', 'depuis quand il se frotte', 'quand a t il commencé à se frotter'], 'Je ne peux pas dire quand cela a commencé.'),
       unknown('earDischarge', ['otorrhée', 'écoulement', 'coule'], 'Je ne peux pas vous dire s’il y a eu un écoulement.'),
       unknown('hydration', ['boit', 'boire', 'bu', 'urines', 'urine', 'pipi', 'couches', 'hydratation'], 'Je ne peux pas vous préciser ce qu’il boit ni à quelle fréquence il fait pipi.'),
       unknown('dose', ['dose', 'dosage', 'heure', 'dernière prise', 'combien de fois', 'quelle quantité', 'quand avez vous donné', 'quand lui avez vous donné'], 'Je ne peux pas préciser la dose ni l’heure de la prise.'),

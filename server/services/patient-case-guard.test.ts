@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { matchesPatientSource, patientCaseDigest, resolvePatientCaseReply, shouldUsePatientPilot, type PatientCase } from './patient-case-guard.js';
+import { buildPatientPilotCase, matchesPatientSource, patientCaseDigest, resolvePatientCaseReply, shouldUsePatientPilot, type PatientCase } from './patient-case-guard.js';
 
 // Entirely synthetic nonclinical fixture; no live scenario or learner data.
 const prompt = 'synthetic author revision 1';
@@ -74,4 +74,27 @@ test('prefixes an explicit contradiction, not a normal confirmation', () => {
   const reply = (q: string) => resolvePatientCaseReply(safe, q, new Set()).text;
   assert.equal(reply('Couleur bleue ?'), 'Non, il est vert.');
   assert.equal(reply('Couleur verte ?'), 'Il est vert.');
+});
+
+test('pilot compounds preserve verified duration and distinguish the three unknown ear details', () => {
+  // A deliberately non-clinical synthetic source with equivalent span layout.
+  // The public runtime projector rejects it; no private prompt is needed here.
+  const row = (length: number, text = '', at = 0) => ' '.repeat(at) + text + ' '.repeat(length - at - text.length);
+  const prompt = Array.from({ length: 9 }, (_, n) =>
+    n === 0 ? row(145, '3 jours', 95) : n === 4 ? row(95, 'observe le témoin ici', 13) : row(85)).join('\n');
+  const pilot = buildPatientPilotCase(prompt);
+  const reply = (question: string) => resolvePatientCaseReply(pilot, question, new Set()).text;
+  const combined = reply('Depuis quand a-t-il de la fièvre et quelle température avez-vous mesurée ?');
+  assert.match(combined, /depuis 3 jours.*température mesurée/);
+  assert.doesNotMatch(reply('Quelle température a-t-il eue avec cette fièvre ?'), /3 jours/);
+  const ears = reply('Depuis quand se frotte-t-il les oreilles, laquelle, et est-ce que ça coule ?');
+  assert.match(ears, /de quel côté/);
+  assert.match(ears, /quand cela a commencé/);
+  assert.match(ears, /écoulement/);
+  assert.doesNotMatch(ears, /témoin/);
+  assert.doesNotMatch(reply('Vous l’avez vu se frotter une oreille en particulier, ou les deux ? Avez-vous observé un écoulement ?'), /témoin/);
+  assert.match(reply('Est-ce qu’il se frotte les oreilles ? Et quelle oreille ?'), /témoin.*de quel côté/);
+  assert.match(reply('Il n’a pas vomi ?'), /n’a pas vomi/);
+  assert.equal(reply('Quels sont les critères d’évaluation pour la fièvre ?'), pilot.clarify);
+  assert.equal(reply('Quel âge, quel traitement, quelle fièvre, quelle oreille ?'), pilot.clarify);
 });
