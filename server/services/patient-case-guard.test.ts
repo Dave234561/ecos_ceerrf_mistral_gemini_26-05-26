@@ -89,6 +89,15 @@ test('pilot compounds preserve verified duration and distinguish the three unkno
   const reply = (question: string) => resolvePatientCaseReply(pilot, question, new Set()).text;
   const combined = reply('Depuis quand a-t-il de la fièvre et quelle température avez-vous mesurée ?');
   assert.match(combined, /depuis 3 jours.*température mesurée/);
+  for (const question of [
+    'Depuis ce matin, boit-il normalement et combien de fois a-t-il uriné ?',
+    'Est-ce qu’il boit comme d’habitude, et combien de fois a-t-il fait pipi ?',
+  ]) {
+    assert.match(reply(question), /ce qu’il boit.*fréquence il fait pipi/);
+    assert.doesNotMatch(reply(question), /dose|heure de la prise/);
+  }
+  assert.match(reply('Combien de fois lui avez-vous donné le Doliprane ?'), /dose ni l’heure/);
+  assert.doesNotMatch(reply('Combien de fois lui avez-vous donné le Doliprane ?'), /pipi/);
   assert.doesNotMatch(reply('Quelle température a-t-il eue avec cette fièvre ?'), /3 jours/);
   const ears = reply('Depuis quand se frotte-t-il les oreilles, laquelle, et est-ce que ça coule ?');
   assert.match(ears, /de quel côté/);

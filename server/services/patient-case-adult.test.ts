@@ -77,3 +77,47 @@ test('separates fever symptoms from measurements and recognizes temporal inversi
   }
   assert.doesNotMatch(ask(5, 'Quel est le barème pour les symptômes qui ont commencé ce matin ?').text, /hier/);
 });
+
+test('answers admission voluntariness and separates stay from previous hospitalization', () => {
+  for (const question of [
+    'Depuis combien de temps êtes-vous ici, et êtes-vous venu de votre plein gré ?',
+    'Êtes-vous venu volontairement ? Depuis quand êtes-vous ici ?',
+  ]) {
+    const reply = ask(4, question).text;
+    assert.match(reply, /de mon plein gré/);
+    assert.match(reply, /Ça fait presque une semaine/);
+    assert.doesNotMatch(reply, /sept jours|deux ans|anniversaire/);
+  }
+  for (const question of ['Avez-vous déjà été hospitalisé auparavant et quand ?', 'Avez-vous été hospitalisé auparavant ?']) {
+    assert.match(ask(4, question).text, /hospitalisé il y a deux ans/);
+  }
+  assert.doesNotMatch(ask(4, 'Êtes-vous venu de votre plein gré pour l’examen clinique ?').text, /plein gré/);
+});
+
+test('separates breathlessness and chest pain, meal and medication, and responds to the expressed concern', () => {
+  for (const question of [
+    'Est-ce que vous avez une douleur dans la poitrine, ou c’est surtout une difficulté à respirer ?',
+    'Avez-vous un essoufflement et une douleur thoracique ?',
+  ]) {
+    const reply = ask(5, question).text;
+    assert.match(reply, /mal à respirer/);
+    assert.match(reply, /ne peux pas vous préciser si j’ai une douleur/);
+    assert.doesNotMatch(reply, /pas de douleur|pas mal à la poitrine/);
+  }
+  for (const question of [
+    'Vous souvenez-vous de votre dernier repas et de votre traitement habituel pour le diabète ?',
+    'Avez-vous mangé et pris les médicaments de votre diabète ?',
+  ]) {
+    const reply = ask(5, question).text;
+    assert.match(reply, /bu ou mangé.*préciser mes médicaments/);
+    assert.doesNotMatch(reply, /insulinodépendant/);
+  }
+  assert.match(ask(5, 'Quel est le type de diabète et quel traitement prenez-vous ?').text, /diabétique non insulinodépendant.*préciser mes médicaments/);
+  for (const question of [
+    'Je vais prévenir l’équipe. Avant cela, quelle est votre inquiétude principale, là, tout de suite ?',
+    'Qu’est-ce qui vous inquiète le plus en ce moment ?',
+  ]) {
+    assert.match(ask(5, question).text, /peur que ça empire/);
+  }
+  assert.doesNotMatch(ask(5, 'Quel barème donnez-vous à cette inquiétude ?').text, /empire/);
+});

@@ -154,6 +154,9 @@ export function buildPatientPilotCase(prompt: string): PatientCase {
     refineMatches(question, matchedIds) {
       const matches = new Set(matchedIds);
       const query = words(question);
+      if (matches.has('hydration') && matches.has('dose') && / combien de fois /.test(query) &&
+          !/ (dose|dosage|heure|derniere prise|quelle quantite|quand avez vous donne|quand lui avez vous donne) /.test(query) &&
+          !/ (doliprane|paracetamol|medicament|prise|donne) /.test(query)) matches.delete('dose');
       if (/ un cote /.test(query) && / (oreille|oreilles|auriculaire) /.test(query)) matches.add('earLaterality');
       const asksDuration = / (depuis quand|depuis combien|ca fait combien|duree|depuis (hier|avant hier|\d+|[a-z]+ jours?)) /.test(query);
       if (matches.has('fever') && matches.has('temperature') && !asksDuration) matches.delete('fever');
@@ -187,7 +190,7 @@ export function buildPatientPilotCase(prompt: string): PatientCase {
       unknown('earLaterality', ['oreille droite', 'oreille gauche', 'quelle oreille', 'une oreille en particulier', 'les deux oreilles', 'quel côté', 'd un côté', 'une oreille ou les deux', 'laquelle', 'à gauche', 'à droite'], 'Je ne peux pas préciser de quel côté.'),
       unknown('earOnset', ['depuis quand a t il mal', 'depuis quand semble t il avoir mal', 'quand a t il commencé à avoir mal à l oreille', 'depuis quand se frotte t il', 'depuis quand il se frotte', 'quand a t il commencé à se frotter'], 'Je ne peux pas dire quand cela a commencé.'),
       unknown('earDischarge', ['otorrhée', 'écoulement', 'coule'], 'Je ne peux pas vous dire s’il y a eu un écoulement.'),
-      unknown('hydration', ['boit', 'boire', 'bu', 'urines', 'urine', 'pipi', 'couches', 'hydratation'], 'Je ne peux pas vous préciser ce qu’il boit ni à quelle fréquence il fait pipi.'),
+      unknown('hydration', ['boit', 'boire', 'bu', 'urines', 'urine', 'uriner', 'a urine', 'pipi', 'couches', 'hydratation'], 'Je ne peux pas vous préciser ce qu’il boit ni à quelle fréquence il fait pipi.'),
       unknown('dose', ['dose', 'dosage', 'heure', 'dernière prise', 'combien de fois', 'quelle quantité', 'quand avez vous donné', 'quand lui avez vous donné'], 'Je ne peux pas préciser la dose ni l’heure de la prise.'),
       unknown('alertness', ['somnolent', 'somnolence', 'éveil', 'difficile à réveiller', 'réactif', 'réagit il', 'réagit', 'réactions']),
       unknown('clinical', ['diagnostic', 'otite', 'otoscope', 'tympan', 'antibiotique', 'antibiotiques', 'prescrivez']),

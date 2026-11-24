@@ -27,7 +27,9 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
     slots: [
       slot('phone', ['téléphone', 'appeler', 'appeler qui', 'portable', 'anniversaire', 'compagne', 'qu est ce qui vous préoccupe', 'vous préoccupe le plus'], 'J’attends le téléphone qu’on m’a promis. Je voudrais appeler ma compagne : c’est son anniversaire.'),
       slot('age', ['âge', 'quel age', 'vous avez quel âge', 'combien d années avez vous'], 'J’ai 35 ans.'),
-      slot('hospital', ['déjà hospitalisé', 'hospitalisation', 'hospitalisé avant', 'déjà été ici'], 'J’ai déjà été hospitalisé il y a deux ans.'),
+      slot('hospital', ['déjà hospitalisé', 'déjà été hospitalisé', 'été hospitalisé auparavant', 'hospitalisation précédente', 'hospitalisé avant', 'déjà été ici'], 'J’ai déjà été hospitalisé il y a deux ans.'),
+      slot('stay', ['combien de temps êtes vous ici', 'combien de temps êtes vous la', 'depuis quand êtes vous ici', 'depuis quand êtes vous hospitalisé', 'durée de votre séjour', 'durée du séjour', 'durée de votre hospitalisation'], 'Ça fait presque une semaine que je suis ici.'),
+      slot('voluntary', ['plein gré', 'venu volontairement', 'venu de vous même', 'venu de mon plein gré', 'hospitalisé volontairement', 'forcé à venir'], 'Je suis venu de mon plein gré.'),
       slot('sleep', ['dormez', 'dormi', 'dormir', 'sommeil', 'insomnie', 'nuits'], 'Je n’ai pas dormi depuis trois jours.'),
       slot('medication', ['traitement', 'médicament', 'médicaments', 'antipsychotique', 'repris', 'repri', 'arrêté'], 'J’ai arrêté le traitement il y a six mois. Je l’ai repris il y a sept jours.'),
       unknown('medicationDetail', ['quel médicament', 'lequel', 'nom du traitement', 'nom du médicament', 'dose', 'dosage', 'posologie', 'combien de comprimés'], 'Je ne peux pas préciser le nom ou la dose.'),
@@ -37,7 +39,7 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       slot('belly', ['ventre', 'abdominal', 'abdominale', 'digestif', 'digestive'], 'Je n’ai pas mal au ventre.', 'negative'),
       unknown('clinical', ['diagnostic', 'schizophrénie', 'psychose', 'constantes', 'tension artérielle', 'examen clinique'], 'Je ne peux pas vous dire ça.'),
     ],
-    allowedCombinations: [['sleep', 'medication'], ['phone', 'age'], ['voices', 'mistrust'], ['medication', 'medicationDetail']],
+    allowedCombinations: [['sleep', 'medication'], ['phone', 'age'], ['voices', 'mistrust'], ['medication', 'medicationDetail'], ['voluntary', 'stay']],
     suppressWhenPresent: { voices: 'voiceDetails' },
     refineMatches(question, matchedIds) {
       if (!matchedIds.has('medicationDetail') || !matchedIds.has('medication')) return matchedIds;
@@ -61,10 +63,10 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       unknown('sequence', ['quelle heure', 'heure précise', 'quel signe en premier', 'quel symptôme en premier', 'apparu en premier', 'apparu d abord', 'commencé en premier', 'quel ordre', 'premier symptôme', 'en premier', 'avant le reste'], 'Je ne saurais pas dire à quelle heure ni dans quel ordre.'),
       slot('fever', ['fièvre', 'frissons', 'fébrile'], 'J’ai de la fièvre et des frissons.'),
       slot('heart', ['palpitations', 'bat vite', 'cœur s emballe', 'cœur qui bat'], 'Je sens mon cœur battre très vite.'),
-      slot('breathing', ['respirer', 'respiration', 'souffle', 'essoufflé', 'essoufflement'], 'J’ai beaucoup de mal à respirer.'),
+      slot('breathing', ['respirer', 'respiration', 'souffle', 'difficulté à respirer', 'du mal à respirer', 'essoufflé', 'essoufflement'], 'J’ai beaucoup de mal à respirer.'),
       slot('fatigue', ['fatigue', 'fatigué', 'faible', 'faiblesse', 'épuisé', 'épuisement'], 'Je me sens très faible et épuisé.'),
       slot('confusion', ['confus', 'confusion', 'idées claires', 'désorienté'], 'J’ai un peu de mal à avoir les idées claires.'),
-      slot('worry', ['inquiet', 'angoissé', 'stressé', 'peur', 's aggrave', 'va empirer'], 'Ça m’inquiète, j’ai peur que ça empire.'),
+      slot('worry', ['inquiet', 'inquiétude', 'vous inquiète', 'vous préoccupe', 'angoissé', 'stressé', 'peur', 's aggrave', 'va empirer'], 'Ça m’inquiète, j’ai peur que ça empire.'),
       slot('thirst', ['soif', 'bouche sèche', 'sec dans la bouche'], 'J’ai soif et la bouche sèche.'),
       unknown('intake', ['bu', 'boire', 'quantité bue', 'combien de verres', 'bu aujourd hui', 'hydratation', 'mangé', 'repas', 'alimentation'], 'Je ne peux pas vous préciser ce que j’ai bu ou mangé.'),
       unknown('urine', ['urine', 'uriner', 'urines', 'pipi', 'toilettes'], 'Je ne peux pas vous préciser mes urines.'),
@@ -75,7 +77,7 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
     allowedCombinations: [
       ['onset', 'sequence'], ['onset', 'clinical'], ['fever', 'clinical'], ['onset', 'fever'], ['onset', 'breathing'], ['onset', 'heart'],
       ['onset', 'fatigue'], ['fever', 'breathing'], ['breathing', 'heart'], ['breathing', 'fatigue'],
-      ['thirst', 'intake'], ['thirst', 'urine'], ['intake', 'urine'], ['thirst', 'intake', 'urine'],
+      ['breathing', 'pain'], ['intake', 'medication'], ['intake', 'medication', 'diabetes'], ['medication', 'diabetes'], ['thirst', 'intake'], ['thirst', 'urine'], ['intake', 'urine'], ['thirst', 'intake', 'urine'],
     ],
     suppressWhenPresent: {
       breathing: 'clinical', heart: 'clinical',
@@ -85,6 +87,10 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       const matches = new Set(matchedIds);
       if (/\b(?:les )?(?:symptomes|signes) ont ils commence (?:ce matin|cet apres midi|ce soir|hier|il y a)\b/.test(q)) {
         matches.add('onset');
+      }
+      if (matches.has('diabetes') && matches.has('medication') &&
+          !askedSeparately(question, /^(?:(?:est ce que|est ce qu) )?(?:avez vous (?:un |du )?(?:diabete)|etes vous diabetique|quel(?: est le)? type de diabete|vous avez (?:un |du )?diabete|depuis quand etes vous diabetique)\b/)) {
+        matches.delete('diabetes');
       }
       if (matches.has('fever') && matches.has('clinical') &&
           !askedSeparately(question, /^(?:(?:est ce que|est ce qu) )?(?:vous avez|avez vous|vous avez eu|avez vous eu|ressentez vous) (?:de la |une |des )?(?:fievre|frissons)\b(?!.*\b(?:mesur|temperature|thermometre|degres)\w*\b)/)) {
