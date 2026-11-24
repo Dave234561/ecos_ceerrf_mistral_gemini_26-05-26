@@ -25,7 +25,10 @@ test('only an exact verified case ID and DB source revision select the guard', (
   assert.equal(shouldUsePatientPilot(1, 'preview'), true);
   assert.equal(shouldUsePatientPilot(1, 'production'), false);
   assert.equal(shouldUsePatientPilot(1, undefined), false);
-  assert.equal(shouldUsePatientPilot(5, 'preview'), false);
+  assert.equal(shouldUsePatientPilot(4, 'preview'), true);
+  assert.equal(shouldUsePatientPilot(5, 'preview'), true);
+  assert.equal(shouldUsePatientPilot(6, 'preview'), false);
+  assert.equal(shouldUsePatientPilot(5, 'production'), false);
 });
 
 test('leading assertions cannot replace authored answers; ambiguity never reaches free generation', () => {

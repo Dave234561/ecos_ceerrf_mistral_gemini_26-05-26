@@ -10,6 +10,8 @@
 
 import { llmService } from './llm.service.js';
 import { timedPatientPhase, patientTimingError } from './patient-timing.js';
+import { createHash } from 'node:crypto';
+import { adultPsychiatricTone } from './patient-case-adult.js';
 import { shouldUsePatientPilot, projectPatientPilot, resolvePatientCaseReply, VerifiedPatientScenarioUnavailableError } from './patient-case-guard.js';
 import { EmptyPatientResponseError } from './mistral.service.js';
 import { conversationMemoryService } from './conversation-memory.service.js';
@@ -64,8 +66,22 @@ export class VirtualPatientService {
       if (!strictCase) throw new VerifiedPatientScenarioUnavailableError('Verified patient scenario unavailable');
       const reply = await timedPatientPhase('patient_case_resolution', () =>
         resolvePatientCaseReply(strictCase, query, new Set()));
+      let response = reply.text;
+      if (strictCase.scenarioId === 4) {
+        // Keep this in-memory state separate per authenticated student and case.
+        // Neither student text nor prior model dialogue is a factual input.
+        const key = 'verified-patient-' + createHash('sha256')
+          .update(JSON.stringify([sessionId, studentEmail, strictCase.sourceDigest])).digest('hex');
+        const state = await conversationMemoryService.initializeConversation(
+          key, studentEmail, 4, undefined, emotionalStateService.initializeEmotionalState(4));
+        if (state.emotionalState) {
+          response = adultPsychiatricTone(response, state.emotionalState.agitationLevel);
+          conversationMemoryService.updateEmotionalState(key, emotionalStateService.updateEmotionalState(
+            state.emotionalState, emotionalStateService.analyzeResponseQuality(query, 4), 4));
+        }
+      }
       return {
-        response: reply.text,
+        response,
         addressing: 'étudiant',
         medicalContext: this.extractMedicalContext(reply.text),
         message: 'Verified patient reply',

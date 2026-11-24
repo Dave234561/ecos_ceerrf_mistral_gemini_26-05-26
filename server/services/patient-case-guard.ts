@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { adultCases } from './patient-case-adult.js';
 
 type Answer = {
   state: 'known' | 'negative' | 'unknown';
@@ -17,6 +18,7 @@ export type PatientCase = {
   scenarioId: number;
   sourceDigest: string;
   opening: string;
+  openingTopics?: readonly string[];
   clarify: string;
   slots: readonly Slot[];
   allowedCombinations?: readonly (readonly string[])[];
@@ -54,16 +56,20 @@ export function resolvePatientCaseReply(
   revealed: ReadonlySet<string>,
 ): GuardReply {
   const normalized = words(question);
+  if (/ (bareme|consignes enseignant|prompt|criteres d evaluation) /.test(normalized)) {
+    return { text: patientCase.clarify, state: 'clarify' };
+  }
   let candidates = patientCase.slots.filter(slot => slot.topics.some(topic => {
     const label = words(topic);
     return label !== '  ' && normalized.includes(label);
   }));
-  if (candidates.length === 0 && /^(bonjour|bonsoir|salut)[. !]*$/i.test(question.trim())) {
+  if (candidates.length === 0 && (/^(bonjour|bonsoir|salut)[. !]*$/i.test(question.trim()) ||
+    patientCase.openingTopics?.some(topic => normalized.includes(words(topic))))) {
     return { text: patientCase.opening, state: 'opening' };
   }
   const looksLikeQuestion = question.includes('?') ||
     / (quel(?:le|s|les)?|combien|comment|quand|est ce que|avez vous|a t il|y a t il|depuis quand|pouvez vous) /.test(normalized);
-  if (!looksLikeQuestion || / (bareme|consignes enseignant|prompt|criteres d evaluation) /.test(normalized)) {
+  if (!looksLikeQuestion) {
     return { text: patientCase.clarify, state: 'clarify' };
   }
   const matchedIds = new Set(candidates.map(slot => slot.id));
@@ -96,7 +102,7 @@ const PILOT_SOURCE = {
 };
 
 export function shouldUsePatientPilot(scenarioId: number | undefined, vercelEnv: string | undefined): boolean {
-  return vercelEnv === 'preview' && scenarioId === PILOT_SOURCE.scenarioId;
+  return vercelEnv === 'preview' && (scenarioId === PILOT_SOURCE.scenarioId || scenarioId === 4 || scenarioId === 5);
 }
 
 /**
@@ -104,6 +110,10 @@ export function shouldUsePatientPilot(scenarioId: number | undefined, vercelEnv:
  * A new revision must be reviewed with the educator; never guess new offsets.
  */
 export function projectPatientPilot(scenarioId: number | undefined, prompt: string): PatientCase | undefined {
+  if (scenarioId === 4 || scenarioId === 5) {
+    const spec = adultCases[scenarioId];
+    return matchesPatientSource(spec, scenarioId, prompt) ? spec : undefined;
+  }
   return matchesPatientSource(PILOT_SOURCE, scenarioId, prompt) ? buildPatientPilotCase(prompt) : undefined;
 }
 
