@@ -23,7 +23,8 @@ export class MistralService {
     const response = await timedPatientPhase('provider', () => this.client.chat.complete({
       model: this.model,
       messages: mappedMessages,
-      ...options
+      temperature: options.temperature,
+      ...(options.max_tokens !== undefined ? { maxTokens: options.max_tokens } : {})
     }), this.model);
     return timedPatientPhase('provider_normalization', () => {
       const content = response.choices?.[0]?.message?.content;
