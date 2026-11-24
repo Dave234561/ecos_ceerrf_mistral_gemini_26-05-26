@@ -1,18 +1,30 @@
-import { Mistral } from '@mistralai/mistralai';
+import { HTTPClient, Mistral } from '@mistralai/mistralai';
 import { logMistralCompletion, timedPatientPhase } from './patient-timing.js';
 
 export class EmptyPatientResponseError extends Error {}
 
 export class MistralService {
   private client: Mistral;
+  private patientLowClient: Mistral;
   private model: string;
 
   constructor(apiKey: string, model: string = 'mistral-large-latest') {
     this.client = new Mistral({ apiKey });
+    // SDK 1.x strips reasoning_effort during serialization. Add it only for the
+    // explicitly selected patient client, retaining SDK authentication and retries.
+    const patientHttpClient = new HTTPClient().addHook('beforeRequest', async (request) => {
+      if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/chat/completions') return request;
+      const payload = await request.clone().json() as Record<string, unknown>;
+      const body = JSON.stringify({ ...payload, reasoning_effort: 'low' });
+      const headers = new Headers(request.headers);
+      headers.delete('content-length');
+      return new Request(request, { body, headers });
+    });
+    this.patientLowClient = new Mistral({ apiKey, httpClient: patientHttpClient });
     this.model = model;
   }
 
-  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number } = {}): Promise<string> {
+  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; reasoningEffort?: 'low' } = {}): Promise<string> {
     // Adapter les messages pour le typage strict du SDK
     const mappedMessages = messages.map((m) => {
       if (m.role === 'system') return { role: 'system', content: m.content };
@@ -20,7 +32,8 @@ export class MistralService {
       if (m.role === 'assistant') return { role: 'assistant', content: m.content };
       return m;
     });
-    const response = await timedPatientPhase('provider', () => this.client.chat.complete({
+    const client = options.reasoningEffort === 'low' ? this.patientLowClient : this.client;
+    const response = await timedPatientPhase('provider', () => client.chat.complete({
       model: this.model,
       messages: mappedMessages,
       temperature: options.temperature,

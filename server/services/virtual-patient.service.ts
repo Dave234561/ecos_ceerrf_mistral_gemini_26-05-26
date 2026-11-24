@@ -363,7 +363,7 @@ IMPORTANT: Respecte ton contexte médical à 100%. L'historique complet de la co
     messages.push({ role: "user", content: query });
 
     // Utilise Mistral (via llmService) pour le patient virtuel
-    return await llmService.generateResponse('', messages);
+    return await llmService.generateResponse('', messages, { simulatedPatient: true });
   }
 
   /**

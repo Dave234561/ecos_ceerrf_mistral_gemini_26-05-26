@@ -15,7 +15,7 @@ if (realtimeProvider === 'gemini') {
 }
 
 export class LLMService {
-  async generateResponse(question, relevantContent) {
+  async generateResponse(question, relevantContent, options: { simulatedPatient?: boolean } = {}) {
     if (provider === 'mistral' && mistralService) {
       // Mistral expects messages array
       const contextText = typeof relevantContent === 'string' ? relevantContent : (relevantContent || []).map((item, idx) => `Context ${idx + 1}:\n${item.content}`).join('\n');
@@ -23,7 +23,11 @@ export class LLMService {
         { role: 'system', content: 'Réponds en français, précis, concis, sans inventer.' },
         { role: 'user', content: `Question: ${question}\n\nContext:\n${contextText}` }
       ];
-      return await mistralService.generateResponse(messages, { max_tokens: 1000, temperature: 0.5 });
+      return await mistralService.generateResponse(messages, {
+        max_tokens: 1000,
+        temperature: 0.5,
+        ...(options.simulatedPatient ? { reasoningEffort: 'low' as const } : {}),
+      });
     }
     // Default: OpenAI
     return await openaiService.generateResponse(question, relevantContent);

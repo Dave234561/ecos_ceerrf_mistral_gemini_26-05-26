@@ -87,3 +87,40 @@ test('completion telemetry exposes only allowlisted metadata before normalizatio
     assert.ok(normalizationIndex > events.indexOf(completion));
   }
 });
+
+test('only the simulated patient sends low reasoning effort over the SDK transport', async (t) => {
+  const settings = { LLM_PROVIDER: 'mistral', MISTRAL_API_KEY: 'fake-mistral-key', OPENAI_API_KEY: 'fake-openai-key', REALTIME_PROVIDER: 'openai' };
+  for (const [key, value] of Object.entries(settings)) {
+    const previous = process.env[key];
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+    process.env[key] = value;
+  }
+  const requests: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, 'fetch', async (request: globalThis.Request) => {
+    assert.equal(new URL(request.url).pathname, '/v1/chat/completions');
+    assert.equal(request.headers.get('authorization'), 'Bearer fake-mistral-key');
+    requests.push(await request.json());
+    return Response.json({
+      id: 'fake-completion', object: 'chat.completion', created: 1, model: 'mistral-large-latest',
+      usage: { prompt_tokens: 4, completion_tokens: 3, total_tokens: 7 },
+      choices: [{ index: 0, message: { role: 'assistant', content: 'Réponse fictive' }, finish_reason: 'stop' }],
+    });
+  });
+  const { llmService } = await import('./llm.service.js');
+  const context = [{ role: 'system', content: 'Scénario fictif' }, { role: 'user', content: 'Question fictive' }];
+  const options = { simulatedPatient: true };
+  await Promise.all([
+    llmService.generateResponse('', context, options),
+    llmService.generateResponse('', context),
+    llmService.createCompletion({ messages: context, max_tokens: 1500, temperature: 0.5 }),
+  ]);
+  assert.equal(requests.length, 3);
+  const withEffort = requests.filter(body => Object.hasOwn(body, 'reasoning_effort'));
+  assert.equal(withEffort.length, 1);
+  const regular = requests.find(body => body.max_tokens === 1000 && !Object.hasOwn(body, 'reasoning_effort'));
+  assert.ok(regular);
+  assert.deepEqual(withEffort[0], { ...regular, reasoning_effort: 'low' });
+  assert.equal(regular.model, 'mistral-large-latest');
+  assert.equal(regular.temperature, 0.5);
+  assert.equal(requests.find(body => body.max_tokens === 1500)?.reasoning_effort, undefined);
+});
