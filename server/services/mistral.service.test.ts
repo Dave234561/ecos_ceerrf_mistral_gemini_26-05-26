@@ -88,7 +88,7 @@ test('completion telemetry exposes only allowlisted metadata before normalizatio
   }
 });
 
-test('only the simulated patient sends low reasoning effort over the SDK transport', async (t) => {
+test('only the simulated patient sends Small 4 with no reasoning over the SDK transport', async (t) => {
   const settings = { LLM_PROVIDER: 'mistral', MISTRAL_API_KEY: 'fake-mistral-key', OPENAI_API_KEY: 'fake-openai-key', REALTIME_PROVIDER: 'openai' };
   for (const [key, value] of Object.entries(settings)) {
     const previous = process.env[key];
@@ -119,7 +119,7 @@ test('only the simulated patient sends low reasoning effort over the SDK transpo
   assert.equal(withEffort.length, 1);
   const regular = requests.find(body => body.max_tokens === 1000 && !Object.hasOwn(body, 'reasoning_effort'));
   assert.ok(regular);
-  assert.deepEqual(withEffort[0], { ...regular, reasoning_effort: 'low' });
+  assert.deepEqual(withEffort[0], { ...regular, model: 'mistral-small-2603', reasoning_effort: 'none' });
   assert.equal(regular.model, 'mistral-large-latest');
   assert.equal(regular.temperature, 0.5);
   assert.equal(requests.find(body => body.max_tokens === 1500)?.reasoning_effort, undefined);

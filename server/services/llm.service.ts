@@ -26,7 +26,7 @@ export class LLMService {
       return await mistralService.generateResponse(messages, {
         max_tokens: 1000,
         temperature: 0.5,
-        ...(options.simulatedPatient ? { reasoningEffort: 'low' as const } : {}),
+        ...(options.simulatedPatient ? { simulatedPatient: true } : {}),
       });
     }
     // Default: OpenAI

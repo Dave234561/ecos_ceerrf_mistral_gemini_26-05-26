@@ -5,7 +5,7 @@ export class EmptyPatientResponseError extends Error {}
 
 export class MistralService {
   private client: Mistral;
-  private patientLowClient: Mistral;
+  private patientSmallClient: Mistral;
   private model: string;
 
   constructor(apiKey: string, model: string = 'mistral-large-latest') {
@@ -15,16 +15,16 @@ export class MistralService {
     const patientHttpClient = new HTTPClient().addHook('beforeRequest', async (request) => {
       if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/chat/completions') return request;
       const payload = await request.clone().json() as Record<string, unknown>;
-      const body = JSON.stringify({ ...payload, reasoning_effort: 'low' });
+      const body = JSON.stringify({ ...payload, reasoning_effort: 'none' });
       const headers = new Headers(request.headers);
       headers.delete('content-length');
       return new Request(request, { body, headers });
     });
-    this.patientLowClient = new Mistral({ apiKey, httpClient: patientHttpClient });
+    this.patientSmallClient = new Mistral({ apiKey, httpClient: patientHttpClient });
     this.model = model;
   }
 
-  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; reasoningEffort?: 'low' } = {}): Promise<string> {
+  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; simulatedPatient?: boolean } = {}): Promise<string> {
     // Adapter les messages pour le typage strict du SDK
     const mappedMessages = messages.map((m) => {
       if (m.role === 'system') return { role: 'system', content: m.content };
@@ -32,13 +32,14 @@ export class MistralService {
       if (m.role === 'assistant') return { role: 'assistant', content: m.content };
       return m;
     });
-    const client = options.reasoningEffort === 'low' ? this.patientLowClient : this.client;
+    const client = options.simulatedPatient ? this.patientSmallClient : this.client;
+    const model = options.simulatedPatient ? 'mistral-small-2603' : this.model;
     const response = await timedPatientPhase('provider', () => client.chat.complete({
-      model: this.model,
+      model,
       messages: mappedMessages,
       temperature: options.temperature,
       ...(options.max_tokens !== undefined ? { maxTokens: options.max_tokens } : {})
-    }), this.model);
+    }), model);
     const choice = response.choices?.[0];
     const content = choice?.message?.content;
     logMistralCompletion(choice?.finishReason, response.usage, content);
@@ -50,7 +51,7 @@ export class MistralService {
           : '';
       if (!text.trim()) throw new EmptyPatientResponseError('No visible model response text');
       return text;
-    }, this.model);
+    }, model);
   }
 }
 
