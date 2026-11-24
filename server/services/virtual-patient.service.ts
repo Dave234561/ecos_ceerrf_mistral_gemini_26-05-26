@@ -10,6 +10,7 @@
 
 import { llmService } from './llm.service.js';
 import { timedPatientPhase, patientTimingError } from './patient-timing.js';
+import { shouldUsePatientPilot, projectPatientPilot, resolvePatientCaseReply, VerifiedPatientScenarioUnavailableError } from './patient-case-guard.js';
 import { EmptyPatientResponseError } from './mistral.service.js';
 import { conversationMemoryService } from './conversation-memory.service.js';
 import { unifiedDb } from './unified-database.service.js';
@@ -55,6 +56,22 @@ export class VirtualPatientService {
     query: string,
     scenarioId?: number
   ): Promise<PatientResponse> {
+    if (shouldUsePatientPilot(scenarioId, process.env.VERCEL_ENV)) {
+      const sourcePrompt = await this.getScenarioPatientPrompt(scenarioId);
+      const strictCase = projectPatientPilot(scenarioId, sourcePrompt);
+      // If the authoritative revision changes or is unavailable, never let the
+      // pilot fall back to a model that can add unverified clinical details.
+      if (!strictCase) throw new VerifiedPatientScenarioUnavailableError('Verified patient scenario unavailable');
+      const reply = await timedPatientPhase('patient_case_resolution', () =>
+        resolvePatientCaseReply(strictCase, query, new Set()));
+      return {
+        response: reply.text,
+        addressing: 'étudiant',
+        medicalContext: this.extractMedicalContext(reply.text),
+        message: 'Verified patient reply',
+      };
+    }
+
     try {
       // Check if scenario supports emotional state tracking
       const emotionalStateEnabled = emotionalStateService.isEmotionalStateEnabled(scenarioId || 1);
