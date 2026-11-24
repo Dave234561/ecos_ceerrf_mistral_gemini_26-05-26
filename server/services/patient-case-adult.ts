@@ -17,7 +17,7 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
     clarify: 'Qu’est-ce que vous voulez savoir exactement ?',
     openingTopics: ['que puis je faire pour vous', 'qu est ce qui vous amène', 'de quoi avez vous besoin', 'comment puis je vous aider', 'qu est ce que vous voulez'],
     slots: [
-      slot('phone', ['téléphone', 'appeler', 'appeler qui', 'portable', 'anniversaire', 'compagne'], 'Je voudrais appeler ma compagne : c’est son anniversaire.'),
+      slot('phone', ['téléphone', 'appeler', 'appeler qui', 'portable', 'anniversaire', 'compagne', 'qu est ce qui vous préoccupe', 'vous préoccupe le plus'], 'J’attends le téléphone qu’on m’a promis. Je voudrais appeler ma compagne : c’est son anniversaire.'),
       slot('age', ['âge', 'quel age', 'vous avez quel âge', 'combien d années avez vous'], 'J’ai 35 ans.'),
       slot('hospital', ['déjà hospitalisé', 'hospitalisation', 'hospitalisé avant', 'déjà été ici'], 'J’ai déjà été hospitalisé il y a deux ans.'),
       slot('sleep', ['dormez', 'dormi', 'dormir', 'sommeil', 'insomnie', 'nuits'], 'Je n’ai pas dormi depuis trois jours.'),
@@ -41,7 +41,7 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
       slot('age', ['âge', 'quel age'], 'J’ai 79 ans.'),
       slot('diabetes', ['diabète', 'diabétique', 'insulinodépendant', 'non insulinodépendant'], 'Je suis diabétique non insulinodépendant.'),
       unknown('residence', ['où habitez vous', 'résidence', 'ehpad', 'foyer', 'lieu de vie'], 'Je ne peux pas préciser où j’habite.'),
-      slot('onset', ['depuis quand', 'quand ça a commencé', 'ça a commencé', 'a commencé il y a', 'ont commencé il y a', 'quand ont commencé', 'début des signes', 'depuis hier', 'depuis combien de temps'], 'J’ai commencé à me sentir mal hier.'),
+      slot('onset', ['depuis quand', 'quand ça a commencé', 'ça a commencé', 'a commencé il y a', 'ont commencé il y a', 'ont commencé ce matin', 'ont commencé cet après midi', 'ont commencé ce soir', 'quand ont commencé', 'début des signes', 'depuis hier', 'depuis combien de temps'], 'J’ai commencé à me sentir mal hier.'),
       unknown('sequence', ['quelle heure', 'heure précise', 'quel signe en premier', 'quel symptôme en premier', 'apparu en premier', 'apparu d abord', 'commencé en premier', 'quel ordre', 'premier symptôme', 'en premier', 'avant le reste'], 'Je ne saurais pas dire à quelle heure ni dans quel ordre.'),
       slot('fever', ['fièvre', 'frissons', 'fébrile'], 'J’ai de la fièvre et des frissons.'),
       slot('heart', ['palpitations', 'bat vite', 'cœur s emballe', 'cœur qui bat'], 'Je sens mon cœur battre très vite.'),
@@ -64,12 +64,18 @@ export const adultCases: Readonly<Record<4 | 5, PatientCase>> = {
     suppressWhenPresent: {
       fever: 'clinical', breathing: 'clinical', heart: 'clinical',
     },
-    refineMatches(_question, matchedIds) {
-      if (!matchedIds.has('sequence')) return matchedIds;
+    refineMatches(question, matchedIds) {
+      const q = question.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ');
+      const symptomIds = ['fever', 'heart', 'breathing', 'fatigue', 'confusion', 'thirst'];
+      const symptomCount = symptomIds.filter(id => matchedIds.has(id)).length;
+      const impliedOrder = (symptomCount > 1 || (symptomCount > 0 && matchedIds.has('onset'))) &&
+        /\bd abord\b.{1,120}\b(puis|ensuite)\b/.test(q);
+      if (!matchedIds.has('sequence') && !impliedOrder) return matchedIds;
       // Named symptoms used as candidates for chronology are not confirmation
       // questions. Keep requested onset, but never assign an order by echo.
       const matches = new Set(matchedIds);
-      for (const id of ['fever', 'heart', 'breathing', 'fatigue', 'confusion', 'thirst']) matches.delete(id);
+      matches.add('sequence');
+      for (const id of symptomIds) matches.delete(id);
       return matches;
     },
   },

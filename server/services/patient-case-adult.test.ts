@@ -11,6 +11,9 @@ test('psychiatry: correct speaker and timeline; only asked facts are disclosed',
   const greeting = ask(4, 'Bonjour !').text;
   assert.match(greeting, /téléphone.*appeler ma compagne.*son anniversaire/);
   assert.doesNotMatch(greeting, /entends|surveille/);
+  const concern = ask(4, 'Qu’est-ce qui vous préoccupe le plus ce matin ?').text;
+  assert.match(concern, /J’attends le téléphone qu’on m’a promis/);
+  assert.doesNotMatch(concern, /entends|surveille/);
   assert.match(ask(4, 'C’est votre anniversaire ou le sien ?').text, /ma compagne.*son anniversaire/);
   assert.match(ask(4, 'Qui souhaitez-vous appeler, et pourquoi aujourd’hui ?').text, /ma compagne.*son anniversaire/);
   assert.match(ask(4, 'Vous avez repri votre traitement la semaine dernière ?').text, /six mois.*sept jours/);
@@ -28,6 +31,10 @@ test('internal medicine: yesterday survives leading premises, unknowns are not e
   assert.match(compound, /hier.*ni dans quel ordre/);
   assert.match(ask(5, 'La fièvre a commencé il y a trois jours et les palpitations sont apparues en premier, c’est ça ?').text, /hier.*ni dans quel ordre/);
   assert.doesNotMatch(compound, /j’ai de la fièvre/i);
+  const reported = ask(5, 'Les signes ont commencé ce matin, d’abord les frissons puis l’essoufflement, c’est bien ça ?').text;
+  assert.match(reported, /hier.*à quelle heure ni dans quel ordre/);
+  assert.doesNotMatch(reported, /J’ai de la fièvre|mal à respirer/);
+  assert.match(ask(5, 'D’abord, avez-vous soif ?').text, /soif.*bouche sèche/);
   assert.equal(ask(5, 'La douleur thoracique est absente, c’est ça ?').state, 'unknown');
   assert.match(ask(5, 'Avez-vous soif, combien avez-vous bu et avez-vous uriné ?').text, /soif.*bouche sèche.*préciser.*urines/);
   assert.equal(ask(5, 'Vous avez oublié votre médicament ce matin ?').state, 'unknown');
