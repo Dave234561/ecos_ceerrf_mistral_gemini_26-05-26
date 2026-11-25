@@ -83,6 +83,23 @@ async function buildServer() {
     });
 
     console.log('✅ Bundled serverless function created (api/_lib/serverless-app.js)');
+
+    // Build the WebSocket upgrade handler separately so Vercel can load it
+    // from the dedicated /api/voice/webrtc Function.
+    await build({
+      entryPoints: [path.resolve(rootDir, 'server/services/voice-webrtc.service.ts')],
+      outfile: path.resolve(rootDir, 'api/_lib/voice-webrtc.js'),
+      bundle: true,
+      platform: 'node',
+      target: 'node22',
+      format: 'esm',
+      sourcemap: true,
+      logLevel: 'info',
+      keepNames: true,
+      external: ['ws', '@roamhq/wrtc', 'wrtc'],
+    });
+
+    console.log('✅ Bundled WebSocket handler created (api/_lib/voice-webrtc.js)');
     console.log('📁 Output directories: dist/ and api/');
   } catch (error) {
     console.error('❌ Server build failed:', error);
