@@ -188,6 +188,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
 
     const dc = pc.createDataChannel('voice');
     dcRef.current = dc;
+    let offerSent = false;
 
     dc.onmessage = async (ev) => {
       if (typeof ev.data !== 'string') return;
@@ -272,6 +273,23 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       let msg: any;
       try { msg = JSON.parse(event.data); } catch { return; }
 
+      if (msg.type === 'ready' && !offerSent) {
+        offerSent = true;
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify({ type: 'offer', offer }));
+        } catch (error) {
+          console.error('🎙️ Failed to start WebRTC negotiation:', error);
+        }
+        return;
+      }
+
+      if (msg.type === 'error') {
+        console.error('🎙️ Voice server error:', msg.message);
+        return;
+      }
+
       if (msg.type === 'answer' && msg.answer) {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
       }
@@ -280,12 +298,6 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
           await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
         } catch {}
       }
-    };
-
-    ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: 'offer', offer }));
     };
 
     const cleanup = () => {
