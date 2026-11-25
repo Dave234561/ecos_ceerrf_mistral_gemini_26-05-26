@@ -8,10 +8,7 @@
     "api/**/*.js": {
       "maxDuration": 60,
       "memory": 3008,
-      "includeFiles": [
-        "node_modules/@roamhq/wrtc/**/*",
-        "node_modules/@roamhq/wrtc-linux-*/**/*"
-      ]
+      "includeFiles": "node_modules/@roamhq/**/*"
     }
   },
   "installCommand": "npm install",
