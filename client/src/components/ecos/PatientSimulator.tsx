@@ -176,6 +176,8 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
 
   useEffect(() => {
     // Connect WebRTC once per simulator session
+    if (!session) return;
+
     const voiceType = session?.scenario?.voiceType || session?.scenario?.voice_type || 'male';
     const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/voice/webrtc?voiceType=${voiceType}`;
     const ws = new WebSocket(wsUrl);
@@ -189,6 +191,12 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     const dc = pc.createDataChannel('voice');
     dcRef.current = dc;
     let offerSent = false;
+
+    dc.onopen = () => console.info('🎙️ WebRTC data channel is open; audio can be sent');
+    dc.onclose = () => console.warn('🎙️ WebRTC data channel closed');
+    pc.onconnectionstatechange = () => {
+      console.info('🎙️ WebRTC connection state:', pc.connectionState);
+    };
 
     dc.onmessage = async (ev) => {
       if (typeof ev.data !== 'string') return;
@@ -275,6 +283,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
 
       if (msg.type === 'ready' && !offerSent) {
         offerSent = true;
+        console.info('🎙️ Voice server ready; starting WebRTC negotiation');
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -314,8 +323,15 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       nextPlayTimeRef.current = 0;
     };
 
-    ws.onerror = cleanup;
-    ws.onclose = cleanup;
+    ws.onopen = () => console.info('🎙️ Voice signaling WebSocket opened');
+    ws.onerror = (event) => {
+      console.error('🎙️ Voice signaling WebSocket error:', event);
+      cleanup();
+    };
+    ws.onclose = (event) => {
+      console.info('🎙️ Voice signaling WebSocket closed:', event.code, event.reason);
+      cleanup();
+    };
 
     return cleanup;
   }, [sessionId, session?.scenario?.id, session?.scenario?.voice_type, session?.scenario?.voiceType]);
