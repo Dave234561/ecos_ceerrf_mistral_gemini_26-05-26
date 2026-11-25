@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/public",
   "framework": null,
+  "fluid": true,
   "functions": {
     "api/**/*.js": {
       "maxDuration": 60,

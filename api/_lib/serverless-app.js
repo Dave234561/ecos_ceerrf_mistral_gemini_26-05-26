@@ -32,6 +32,97 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// server/services/patient-timing.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
+function safeLabel(value) {
+  return value && /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(value) ? value : void 0;
+}
+function log(trace, phase, outcome, start, model, error, status) {
+  const now = performance.now();
+  console.info(JSON.stringify({
+    event: "ecos.patient.timing",
+    trace_id: trace.id,
+    phase,
+    outcome,
+    elapsed_ms: Math.round((now - trace.start) * 10) / 10,
+    duration_ms: Math.round((now - start) * 10) / 10,
+    model: safeLabel(model),
+    error_class: outcome === "error" ? error instanceof Error ? safeLabel(error.constructor.name) || "Error" : "NonError" : void 0,
+    status
+  }));
+}
+async function timedPatientPhase(phase, run, model) {
+  const trace = context.getStore();
+  if (!trace) return run();
+  const start = performance.now();
+  log(trace, phase, "start", start, model);
+  try {
+    const value = await run();
+    log(trace, phase, "ok", start, model);
+    return value;
+  } catch (error) {
+    log(trace, phase, "error", start, model, error);
+    throw error;
+  }
+}
+function patientTimingError(phase, error) {
+  const trace = context.getStore();
+  if (trace) log(trace, phase, "error", performance.now(), void 0, error);
+}
+function safeCount(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : void 0;
+}
+function logMistralCompletion(finishReason, usage, content) {
+  const trace = context.getStore();
+  if (!trace) return;
+  const chunks = Array.isArray(content) ? content : void 0;
+  console.info(JSON.stringify({
+    event: "ecos.patient.mistral_completion",
+    trace_id: trace.id,
+    finish_reason: finishReason === void 0 ? "missing" : mistralFinishReasons.includes(finishReason) ? finishReason : "other",
+    prompt_tokens: safeCount(usage?.promptTokens),
+    completion_tokens: safeCount(usage?.completionTokens),
+    total_tokens: safeCount(usage?.totalTokens),
+    content_shape: chunks ? "chunks" : typeof content === "string" ? "string" : "missing",
+    chunk_count: chunks?.length,
+    text_chunk_count: chunks?.filter((chunk) => chunk.type === "text").length,
+    thinking_chunk_count: chunks?.filter((chunk) => chunk.type === "thinking").length
+  }));
+}
+var context, patientTiming, mistralFinishReasons;
+var init_patient_timing = __esm({
+  "server/services/patient-timing.ts"() {
+    "use strict";
+    context = new AsyncLocalStorage();
+    __name(safeLabel, "safeLabel");
+    __name(log, "log");
+    patientTiming = /* @__PURE__ */ __name((_req, res, next) => {
+      const trace = { id: randomUUID(), start: performance.now() };
+      const finish = /* @__PURE__ */ __name(() => {
+        res.off("close", close);
+        log(trace, "response", "ok", trace.start, void 0, void 0, res.statusCode);
+      }, "finish");
+      const close = /* @__PURE__ */ __name(() => {
+        res.off("finish", finish);
+        log(trace, "response", "closed", trace.start, void 0, void 0, res.headersSent ? res.statusCode : void 0);
+      }, "close");
+      res.once("finish", finish);
+      res.once("close", close);
+      context.run(trace, () => {
+        log(trace, "route", "start", trace.start);
+        next();
+      });
+    }, "patientTiming");
+    __name(timedPatientPhase, "timedPatientPhase");
+    __name(patientTimingError, "patientTimingError");
+    mistralFinishReasons = ["stop", "length", "model_length", "error", "tool_calls"];
+    __name(safeCount, "safeCount");
+    __name(logMistralCompletion, "logMistralCompletion");
+  }
+});
+
 // server/services/logger.service.ts
 var _Logger, Logger, logger, dbLogger, authLogger, apiLogger;
 var init_logger_service = __esm({
@@ -42,12 +133,12 @@ var init_logger_service = __esm({
         this.serviceName = serviceName;
         this.isDevelopment = process.env.NODE_ENV !== "production";
       }
-      formatLog(level, message, context) {
+      formatLog(level, message, context2) {
         return {
           timestamp: (/* @__PURE__ */ new Date()).toISOString(),
           level,
           message,
-          context,
+          context: context2,
           service: this.serviceName,
           requestId: this.getCurrentRequestId()
         };
@@ -55,13 +146,13 @@ var init_logger_service = __esm({
       getCurrentRequestId() {
         return void 0;
       }
-      log(level, message, context) {
-        const entry = this.formatLog(level, message, context);
+      log(level, message, context2) {
+        const entry = this.formatLog(level, message, context2);
         if (this.isDevelopment) {
           const emoji = this.getLevelEmoji(level);
           const coloredLevel = this.getColoredLevel(level);
-          if (context && Object.keys(context).length > 0) {
-            console.log(`${emoji} ${coloredLevel} [${this.serviceName}] ${message}`, context);
+          if (context2 && Object.keys(context2).length > 0) {
+            console.log(`${emoji} ${coloredLevel} [${this.serviceName}] ${message}`, context2);
           } else {
             console.log(`${emoji} ${coloredLevel} [${this.serviceName}] ${message}`);
           }
@@ -88,42 +179,42 @@ var init_logger_service = __esm({
       getColoredLevel(level) {
         return level.toUpperCase();
       }
-      error(message, context) {
-        this.log("error" /* ERROR */, message, context);
+      error(message, context2) {
+        this.log("error" /* ERROR */, message, context2);
       }
-      warn(message, context) {
-        this.log("warn" /* WARN */, message, context);
+      warn(message, context2) {
+        this.log("warn" /* WARN */, message, context2);
       }
-      info(message, context) {
-        this.log("info" /* INFO */, message, context);
+      info(message, context2) {
+        this.log("info" /* INFO */, message, context2);
       }
-      debug(message, context) {
+      debug(message, context2) {
         if (this.isDevelopment) {
-          this.log("debug" /* DEBUG */, message, context);
+          this.log("debug" /* DEBUG */, message, context2);
         }
       }
-      trace(message, context) {
+      trace(message, context2) {
         if (this.isDevelopment) {
-          this.log("trace" /* TRACE */, message, context);
+          this.log("trace" /* TRACE */, message, context2);
         }
       }
       // Database operation logging
-      database(operation, duration, context) {
+      database(operation, duration, context2) {
         const logContext = {
           operation,
           duration: duration ? `${duration}ms` : void 0,
-          ...context
+          ...context2
         };
         this.info(`Database ${operation}`, logContext);
       }
       // HTTP request logging
-      request(method, path, statusCode, duration, context) {
+      request(method, path, statusCode, duration, context2) {
         const logContext = {
           method,
           path,
           statusCode,
           duration: duration ? `${duration}ms` : void 0,
-          ...context
+          ...context2
         };
         if (statusCode && statusCode >= 400) {
           this.error(`HTTP ${method} ${path}`, logContext);
@@ -132,12 +223,12 @@ var init_logger_service = __esm({
         }
       }
       // Service initialization logging
-      service(serviceName, status, duration, context) {
+      service(serviceName, status, duration, context2) {
         const logContext = {
           service: serviceName,
           status,
           duration: duration ? `${duration}ms` : void 0,
-          ...context
+          ...context2
         };
         switch (status) {
           case "starting":
@@ -1830,804 +1921,289 @@ var init_unified_database_service = __esm({
   }
 });
 
-// server/services/firebase-admin.service.ts
-var firebase_admin_service_exports = {};
-__export(firebase_admin_service_exports, {
-  firebaseAdminService: () => firebaseAdminService
-});
-var _FirebaseAdminService, FirebaseAdminService, firebaseAdminService;
-var init_firebase_admin_service = __esm({
-  "server/services/firebase-admin.service.ts"() {
-    "use strict";
-    _FirebaseAdminService = class _FirebaseAdminService {
-      constructor() {
-        this.initialized = false;
-        this.app = null;
-        this.initializationPromise = null;
-        this.firebaseAdmin = null;
-        this.firebaseAuth = null;
-      }
-      /**
-       * Lazy load Firebase Admin modules
-       */
-      async loadFirebaseModules() {
-        if (this.firebaseAdmin && this.firebaseAuth) {
-          return;
-        }
-        try {
-          console.log("\u{1F4E6} Loading firebase-admin modules...");
-          this.firebaseAdmin = await import("firebase-admin/app");
-          this.firebaseAuth = await import("firebase-admin/auth");
-          console.log("\u2705 Firebase Admin modules loaded successfully");
-        } catch (error) {
-          console.error("\u274C Failed to load Firebase Admin modules:", {
-            message: error.message,
-            code: error.code,
-            stack: error.stack
-          });
-          throw new Error(`Firebase Admin SDK not available: ${error.message}`);
-        }
-      }
-      /**
-       * Initialize Firebase Admin SDK (lazy initialization)
-       */
-      async initialize() {
-        if (this.initializationPromise) {
-          return this.initializationPromise;
-        }
-        if (this.initialized) {
-          return;
-        }
-        this.initializationPromise = (async () => {
-          try {
-            console.log("\u{1F525} Initializing Firebase Admin SDK...");
-            await this.loadFirebaseModules();
-            const projectId = process.env.FIREBASE_PROJECT_ID;
-            const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-            let privateKey = process.env.FIREBASE_PRIVATE_KEY;
-            if (!projectId || !clientEmail || !privateKey) {
-              const missing = [];
-              if (!projectId) missing.push("FIREBASE_PROJECT_ID");
-              if (!clientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
-              if (!privateKey) missing.push("FIREBASE_PRIVATE_KEY");
-              throw new Error(`Missing Firebase credentials: ${missing.join(", ")}`);
-            }
-            if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
-              privateKey = privateKey.substring(1, privateKey.length - 1);
-            }
-            const formattedPrivateKey = privateKey.replace(/\\n/g, "\n");
-            console.log("\u{1F527} Firebase Config:", {
-              projectId,
-              clientEmail,
-              privateKeyLength: privateKey.length,
-              hasNewLines: privateKey.includes("\n"),
-              hasEscapedNewLines: privateKey.includes("\\n")
-            });
-            const existingApps = this.firebaseAdmin.getApps();
-            if (existingApps.length === 0) {
-              this.app = this.firebaseAdmin.initializeApp({
-                credential: this.firebaseAdmin.cert({
-                  projectId,
-                  clientEmail,
-                  privateKey: formattedPrivateKey
-                })
-              });
-              console.log("\u2705 Firebase app initialized");
-            } else {
-              this.app = existingApps[0];
-              console.log("\u2705 Using existing Firebase app");
-            }
-            this.initialized = true;
-          } catch (error) {
-            console.error("\u274C Firebase Admin SDK initialization failed:", {
-              message: error.message,
-              stack: error.stack
-            });
-            this.initializationPromise = null;
-            throw error;
-          }
-        })();
-        return this.initializationPromise;
-      }
-      /**
-       * Verify Firebase ID token
-       * @param idToken - Firebase ID token from client
-       * @returns Decoded token with user info
-       */
-      async verifyIdToken(idToken) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const decodedToken = await auth.verifyIdToken(idToken);
-          console.log("\u2705 Firebase ID token verified:", { uid: decodedToken.uid, email: decodedToken.email });
-          return decodedToken;
-        } catch (error) {
-          console.error("\u274C Firebase ID token verification failed:", error);
-          throw new Error("Invalid or expired Firebase ID token");
-        }
-      }
-      /**
-       * Get user by email
-       * @param email - User email
-       * @returns Firebase user record
-       */
-      async getUserByEmail(email) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const user = await auth.getUserByEmail(email);
-          return user;
-        } catch (error) {
-          if (error.code === "auth/user-not-found") {
-            return null;
-          }
-          console.error("\u274C Error fetching user by email:", error);
-          throw error;
-        }
-      }
-      /**
-       * Get user by UID
-       * @param uid - Firebase UID
-       * @returns Firebase user record
-       */
-      async getUserByUid(uid) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const user = await auth.getUser(uid);
-          return user;
-        } catch (error) {
-          if (error.code === "auth/user-not-found") {
-            return null;
-          }
-          console.error("\u274C Error fetching user by UID:", error);
-          throw error;
-        }
-      }
-      /**
-       * Create a new Firebase user
-       * @param email - User email
-       * @param password - User password
-       * @returns Created user record
-       */
-      async createUser(email, password) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const user = await auth.createUser({
-            email,
-            password,
-            emailVerified: false
-          });
-          console.log("\u2705 Firebase user created:", { uid: user.uid, email: user.email });
-          return user;
-        } catch (error) {
-          console.error("\u274C Error creating Firebase user:", error);
-          throw error;
-        }
-      }
-      /**
-       * Create a custom token the client exchanges for a Firebase session (signInWithCustomToken)
-       * @param uid - Firebase UID
-       */
-      async createCustomToken(uid) {
-        await this.initialize();
-        return this.firebaseAuth.getAuth().createCustomToken(uid);
-      }
-      /**
-       * Set custom user claims (roles)
-       * @param uid - Firebase UID
-       * @param claims - Custom claims object (e.g., { role: 'admin' })
-       */
-      async setCustomClaims(uid, claims) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          await auth.setCustomUserClaims(uid, claims);
-          console.log("\u2705 Custom claims set for user:", { uid, claims });
-        } catch (error) {
-          console.error("\u274C Error setting custom claims:", error);
-          throw error;
-        }
-      }
-      /**
-       * Get custom claims for a user
-       * @param uid - Firebase UID
-       * @returns Custom claims object
-       */
-      async getCustomClaims(uid) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const user = await auth.getUser(uid);
-          return user.customClaims || {};
-        } catch (error) {
-          console.error("\u274C Error getting custom claims:", error);
-          throw error;
-        }
-      }
-      /**
-       * Send password reset email
-       * @param email - User email
-       */
-      async sendPasswordResetEmail(email) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          const link = await auth.generatePasswordResetLink(email);
-          console.log("\u2705 Password reset link generated for:", email);
-          console.log("\u{1F517} Reset link:", link);
-        } catch (error) {
-          console.error("\u274C Error generating password reset link:", error);
-          throw error;
-        }
-      }
-      /**
-       * Delete a Firebase user
-       * @param uid - Firebase UID
-       */
-      async deleteUser(uid) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          await auth.deleteUser(uid);
-          console.log("\u2705 Firebase user deleted:", uid);
-        } catch (error) {
-          console.error("\u274C Error deleting Firebase user:", error);
-          throw error;
-        }
-      }
-      /**
-       * Update user email
-       * @param uid - Firebase UID
-       * @param newEmail - New email address
-       */
-      async updateUserEmail(uid, newEmail) {
-        await this.initialize();
-        try {
-          const auth = this.firebaseAuth.getAuth();
-          await auth.updateUser(uid, { email: newEmail });
-          console.log("\u2705 User email updated:", { uid, newEmail });
-        } catch (error) {
-          console.error("\u274C Error updating user email:", error);
-          throw error;
-        }
-      }
-      /**
-       * Check if Firebase Admin is initialized
-       */
-      isInitialized() {
-        return this.initialized;
-      }
-    };
-    __name(_FirebaseAdminService, "FirebaseAdminService");
-    FirebaseAdminService = _FirebaseAdminService;
-    firebaseAdminService = new FirebaseAdminService();
-  }
-});
-
-// server/services/openai.service.ts
-import OpenAI from "openai";
-var openai, _OpenAIService, OpenAIService, openaiService;
-var init_openai_service = __esm({
-  "server/services/openai.service.ts"() {
-    "use strict";
-    init_retry();
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || ""
-    });
-    _OpenAIService = class _OpenAIService {
-      constructor() {
-        this.systemPrompt = `You are an educational assistant for a LearnWorlds learning management system. Speak only in French.
-Answer questions about the course content based on the context provided.
-Be helpful, precise, and concise. If you don't know the answer based on the provided context, say so clearly. If you don't know the answer based on the provided context, say so clearly.
-Do not make up information, NEVER. 
-
-IMPORTANT: At the end of EVERY response, you MUST include this exact link in markdown format:
-[Cours d'arthrologie du membre sup\xE9rieur](https://academy.ceerrf.fr/course/arthrologie-du-membre-superieur)
-
-This link must appear at the end of the answer when usefull specially for the first answer.`;
-      }
-      /**
-       * Generates a response for the given question based on relevant content
-       */
-      async generateResponse(question, relevantContent) {
-        try {
-          let contextText = "";
-          if (relevantContent && typeof relevantContent !== "string" && relevantContent.length > 0) {
-            contextText = relevantContent.map((item, index) => {
-              const source = item.metadata?.source ? ` (Source: ${item.metadata.source})` : "";
-              return `Context ${index + 1}${source}:
-${item.content}
-`;
-            }).join("\n");
-          } else if (typeof relevantContent === "string") {
-            contextText = relevantContent;
-          }
-          const userPrompt = `Question: ${question}
-
-Relevant Content:
-${contextText}`;
-          const response = await withRetry(
-            () => openai.chat.completions.create({
-              model: "gpt-4o",
-              messages: [
-                { role: "system", content: this.systemPrompt },
-                { role: "user", content: userPrompt }
-              ],
-              temperature: 0.5,
-              max_tokens: 1e3
-            }),
-            {
-              ...RetryPresets.externalApi,
-              operationName: "OpenAI generateResponse"
-            }
-          );
-          return response.choices[0].message.content || "Je n'ai pas pu g\xE9n\xE9rer une r\xE9ponse. Veuillez r\xE9essayer.";
-        } catch (error) {
-          console.error("Error generating OpenAI response:", error);
-          throw new Error(
-            "Impossible de g\xE9n\xE9rer une r\xE9ponse. Service indisponible."
-          );
-        }
-      }
-      /**
-       * Create a completion with custom system prompt (for ECOS evaluation)
-       */
-      async createCompletion(params) {
-        try {
-          const apiParams = {
-            model: params.model,
-            messages: params.messages
-          };
-          if (params.temperature !== void 0) apiParams.temperature = params.temperature;
-          if (params.max_tokens !== void 0) apiParams.max_tokens = params.max_tokens;
-          if (params.max_completion_tokens !== void 0) apiParams.max_completion_tokens = params.max_completion_tokens;
-          if (params.reasoning !== void 0) apiParams.reasoning = params.reasoning;
-          if (params.text !== void 0) apiParams.text = params.text;
-          if (params.response_format !== void 0) apiParams.response_format = params.response_format;
-          const response = await withRetry(
-            () => openai.chat.completions.create(apiParams),
-            {
-              ...RetryPresets.externalApi,
-              operationName: "OpenAI createCompletion"
-            }
-          );
-          return response;
-        } catch (error) {
-          console.error("Error creating OpenAI completion:", error);
-          throw new Error("Impossible de g\xE9n\xE9rer une r\xE9ponse. Service indisponible.");
-        }
-      }
-      /**
-       * Convert natural language question to SQL query
-       */
-      async convertToSQL(question, schema) {
-        try {
-          console.log("Conversion SQL - Question re\xE7ue:", question);
-          console.log("Conversion SQL - Sch\xE9ma fourni:", schema.substring(0, 200) + "...");
-          const prompt = `Tu es un expert en bases de donn\xE9es PostgreSQL. Convertis cette question en langage naturel en requ\xEAte SQL valide.
-
-Base de donn\xE9es PostgreSQL avec le sch\xE9ma suivant :
-${schema}
-
-Question en fran\xE7ais : ${question}
-
-Instructions importantes :
-- G\xE9n\xE8re uniquement une requ\xEAte SELECT (pas d'INSERT, UPDATE, DELETE)
-- Utilise la syntaxe PostgreSQL
-- Utilise UNIQUEMENT les tables et colonnes list\xE9es dans le sch\xE9ma ci-dessus
-- ATTENTION: Dans la table 'exchanges' la colonne utilisateur s'appelle 'utilisateur_email' (PAS 'email')
-- ATTENTION: Dans la table 'daily_counters' la colonne utilisateur s'appelle 'utilisateur_email' (PAS 'email')
-- Pour les questions sur les utilisateurs connect\xE9s/actifs, utilise la table 'exchanges' avec la colonne 'utilisateur_email'
-- Pour les compteurs quotidiens, utilise la table 'daily_counters' avec la colonne 'utilisateur_email'
-- Pour les dates, utilise DATE(timestamp) = CURRENT_DATE pour aujourd'hui
-- Pour compter les utilisateurs uniques: COUNT(DISTINCT utilisateur_email)
-- Inclus les alias de tables si n\xE9cessaire
-- R\xE9ponds uniquement avec la requ\xEAte SQL, sans explication ni markdown
-
-Requ\xEAte SQL :`;
-          const response = await withRetry(
-            () => openai.chat.completions.create({
-              model: "gpt-4o",
-              messages: [
-                {
-                  role: "system",
-                  content: "Tu es un expert en conversion de langage naturel vers SQL. R\xE9ponds uniquement avec la requ\xEAte SQL demand\xE9e, sans formatage markdown."
-                },
-                { role: "user", content: prompt }
-              ],
-              max_tokens: 300,
-              temperature: 0.1
-            }),
-            {
-              ...RetryPresets.externalApi,
-              operationName: "OpenAI convertToSQL"
-            }
-          );
-          let sqlQuery = response.choices[0].message.content?.trim() || "";
-          console.log("R\xE9ponse OpenAI brute:", sqlQuery);
-          sqlQuery = sqlQuery.replace(/```sql\s*/gi, "").replace(/```\s*/gi, "");
-          const sqlMatch = sqlQuery.match(/(SELECT[\s\S]*?)(?:\n\s*$|$)/i);
-          if (sqlMatch) {
-            sqlQuery = sqlMatch[1].trim();
-            console.log("SQL extrait:", sqlQuery);
-          }
-          sqlQuery = sqlQuery.replace(/;\s*$/, "");
-          if (!sqlQuery.toLowerCase().includes("select")) {
-            console.log("\xC9chec validation - pas de SELECT trouv\xE9 dans:", sqlQuery);
-            throw new Error("Aucune requ\xEAte SELECT valide trouv\xE9e dans la r\xE9ponse");
-          }
-          if (!sqlQuery.toLowerCase().trim().startsWith("select")) {
-            console.log("\xC9chec validation - ne commence pas par SELECT:", sqlQuery);
-            throw new Error("La requ\xEAte doit commencer par SELECT");
-          }
-          console.log("SQL final valid\xE9:", sqlQuery);
-          return sqlQuery;
-        } catch (error) {
-          console.error("Error converting to SQL:", error);
-          if (error instanceof Error) {
-            throw new Error(`Impossible de convertir la question en requ\xEAte SQL: ${error.message}`);
-          }
-          throw new Error("Impossible de convertir la question en requ\xEAte SQL");
-        }
-      }
-    };
-    __name(_OpenAIService, "OpenAIService");
-    OpenAIService = _OpenAIService;
-    openaiService = new OpenAIService();
-  }
-});
-
-// server/services/gemini-live-tts.service.ts
-var gemini_live_tts_service_exports = {};
-__export(gemini_live_tts_service_exports, {
-  GeminiLiveTTS: () => GeminiLiveTTS
-});
-import { createRequire } from "module";
-var _GeminiLiveTTS, GeminiLiveTTS;
-var init_gemini_live_tts_service = __esm({
-  "server/services/gemini-live-tts.service.ts"() {
-    "use strict";
-    _GeminiLiveTTS = class _GeminiLiveTTS {
-      constructor() {
-        this.closed = false;
-      }
-      static async connect(params) {
-        const require2 = createRequire(import.meta.url);
-        const { GoogleGenAI, Modality } = require2("@google/genai");
-        const ai = new GoogleGenAI({ apiKey: params.apiKey });
-        const finalVoiceName = params.voiceName || "Puck";
-        console.log(`\u{1F3A4} Initializing Gemini Live with voice: ${finalVoiceName} (requested: ${params.voiceName})`);
-        const session = await ai.live.connect({
-          model: params.model,
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: finalVoiceName
-                }
-              }
-            },
-            systemInstruction: params.systemInstruction,
-            tools: params.tools
-          },
-          callbacks: {
-            onopen: /* @__PURE__ */ __name(() => {
-              console.log("\u2705 Gemini Live connection opened");
-            }, "onopen"),
-            onmessage: /* @__PURE__ */ __name((message) => {
-              params.onMessage(message);
-            }, "onmessage"),
-            onerror: /* @__PURE__ */ __name((err) => {
-              console.error("\u274C Gemini Live error:", err);
-              if (params.onError) params.onError(err);
-            }, "onerror"),
-            onclose: /* @__PURE__ */ __name((ev) => {
-              console.log("\u2139\uFE0F Gemini Live connection closed");
-              if (params.onClose) params.onClose(ev);
-            }, "onclose")
-          }
-        });
-        const tts = new _GeminiLiveTTS();
-        tts.session = session;
-        return tts;
-      }
-      async sendToolResponse(toolOutputs) {
-        if (this.closed) return;
-        await this.session.send({
-          toolResponse: {
-            functionResponses: toolOutputs
-          }
-        });
-      }
-      async speakText(text) {
-        if (this.closed) return;
-        if (!text || !text.trim()) return;
-        await this.session.send({
-          clientContent: {
-            turns: [{
-              role: "user",
-              parts: [{ text }]
-            }],
-            turnComplete: true
-          }
-        });
-      }
-      /**
-       * Send raw audio data to Gemini Live for real-time speech recognition and response.
-       * Based on official documentation: session.sendRealtimeInput({ audio: { data, mimeType } })
-       */
-      async sendAudio(audioBase64, mimeType = "audio/pcm;rate=16000") {
-        if (this.closed) return;
-        if (!audioBase64) return;
-        await this.session.sendRealtimeInput({
-          audio: {
-            data: audioBase64,
-            mimeType
-          }
-        });
-      }
-      close() {
-        if (this.closed) return;
-        this.closed = true;
-        try {
-          this.session?.close?.();
-        } catch {
-        }
-      }
-    };
-    __name(_GeminiLiveTTS, "GeminiLiveTTS");
-    GeminiLiveTTS = _GeminiLiveTTS;
-  }
-});
-
-// server/services/voice-webrtc.service.ts
-var voice_webrtc_service_exports = {};
-__export(voice_webrtc_service_exports, {
-  setupVoiceWebRTC: () => setupVoiceWebRTC
-});
-import { createRequire as createRequire2 } from "module";
-import { WebSocketServer } from "ws";
-function safeJsonParse(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+// server/services/patient-case-adult.ts
+function normalizedQuestion(question) {
+  return question.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
-function setupVoiceWebRTC(httpServer) {
-  const wss = new WebSocketServer({ noServer: true });
-  httpServer.on("upgrade", (req, socket, head) => {
-    try {
-      const url = new URL(req.url || "", `http://${req.headers.host}`);
-      if (url.pathname !== "/api/voice/webrtc") return;
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        ws.upgradeReq = req;
-        wss.emit("connection", ws, req);
-      });
-    } catch (e) {
-      socket.destroy();
-    }
-  });
-  wss.on("connection", async (ws, req) => {
-    const url = new URL(req.url || "", `http://${req.headers.host}`);
-    const requestedVoiceType = url.searchParams.get("voiceType") || "male";
-    const voiceName = requestedVoiceType === "female" ? "Kore" : "Puck";
-    console.log(`\u{1F399}\uFE0F New Voice WebRTC connection. VoiceType: ${requestedVoiceType}, Gemini Voice: ${voiceName}`);
-    let wrtc = null;
-    try {
-      const require2 = createRequire2(import.meta.url);
-      try {
-        wrtc = require2("@roamhq/wrtc");
-      } catch {
-        wrtc = require2("wrtc");
-      }
-    } catch {
-      ws.send(JSON.stringify({
-        type: "error",
-        message: "Missing WebRTC dependency. Install with: npm i @roamhq/wrtc (recommended)  OR  npm i wrtc"
-      }));
-      ws.close();
-      return;
-    }
-    let GeminiLiveTTS2 = null;
-    try {
-      const mod = await Promise.resolve().then(() => (init_gemini_live_tts_service(), gemini_live_tts_service_exports));
-      GeminiLiveTTS2 = mod.GeminiLiveTTS;
-    } catch {
-      ws.send(JSON.stringify({ type: "error", message: "Missing Gemini Live bridge. Ensure server/services/gemini-live-tts.service.ts is built and '@google/genai' is installed." }));
-      ws.close();
-      return;
-    }
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
-    if (!apiKey) {
-      ws.send(JSON.stringify({ type: "error", message: "Missing GEMINI_API_KEY on server." }));
-      ws.close();
-      return;
-    }
-    const pc = new wrtc.RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
-    let dataChannel = null;
-    console.log(`\u{1F527} Connecting to Gemini Live with config:`, {
-      model,
-      voiceName,
-      requestedVoiceType
-    });
-    const gemini = await GeminiLiveTTS2.connect({
-      apiKey,
-      model,
-      voiceName,
-      systemInstruction: "Tu es un patient virtuel. R\xE9ponds naturellement en fran\xE7ais. Si l'utilisateur semble h\xE9siter ou s'arr\xEAter au milieu d'une phrase, utilise l'outil wait_more pour lui indiquer que tu attends la suite.",
-      tools: [
-        {
-          function_declarations: [
-            {
-              name: "wait_more",
-              description: "Indique au syst\xE8me d'attendre que l'utilisateur finisse sa phrase. \xC0 utiliser si l'utilisateur marque une pause mais semble avoir encore des choses \xE0 dire.",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  reason: {
-                    type: "STRING",
-                    description: "La raison pour laquelle on attend (optionnel)."
-                  }
-                }
-              }
-            }
-          ]
-        }
-      ],
-      onMessage: /* @__PURE__ */ __name(async (message) => {
-        try {
-          if (message?.serverContent?.interrupted) {
-            dataChannel?.send(JSON.stringify({ type: "interrupt" }));
-            return;
-          }
-          const userTranscription = message?.serverContent?.userTurn?.parts?.[0]?.text;
-          if (userTranscription) {
-            console.log("\u{1F5E3}\uFE0F User transcript from Gemini:", userTranscription);
-            dataChannel?.send(JSON.stringify({ type: "transcript", text: userTranscription, role: "user" }));
-          }
-          const modelTranscription = message?.serverContent?.modelTurn?.parts?.[0]?.text;
-          if (modelTranscription) {
-            dataChannel?.send(JSON.stringify({ type: "transcript", text: modelTranscription, role: "assistant" }));
-          }
-          const toolCall = message?.toolCall;
-          if (toolCall?.functionCalls) {
-            const toolResponses = [];
-            for (const fc of toolCall.functionCalls) {
-              if (fc.name === "wait_more") {
-                console.log("\u{1F916} Bot called wait_more");
-                dataChannel?.send(JSON.stringify({ type: "waiting", message: "Le patient vous attend..." }));
-                toolResponses.push({
-                  name: fc.name,
-                  id: fc.id,
-                  response: { success: true, status: "waiting" }
-                });
-              }
-            }
-            if (toolResponses.length > 0) {
-              await gemini.sendToolResponse(toolResponses);
-            }
-            return;
-          }
-          const parts = message?.serverContent?.modelTurn?.parts;
-          if (!Array.isArray(parts)) {
-            console.log("\u{1F50D} No parts found in message:", JSON.stringify(message, null, 2));
-            return;
-          }
-          console.log(`\u{1F3B5} Processing ${parts.length} parts from Gemini Live (voice: ${voiceName})`);
-          for (const part of parts) {
-            const b64 = part?.inlineData?.data;
-            const mimeType = part?.inlineData?.mimeType;
-            if (!b64) {
-              console.log("\u{1F50D} Part without audio data:", part);
-              continue;
-            }
-            console.log(`\u{1F3B5} Sending audio chunk: ${mimeType}, size: ${b64.length} chars`);
-            dataChannel?.send(JSON.stringify({ type: "audio", data: b64, mimeType }));
-          }
-        } catch (err) {
-          logger.warn("Voice WebRTC: failed to forward Gemini audio chunk", { error: err?.message });
-        }
-      }, "onMessage"),
-      onError: /* @__PURE__ */ __name((err) => {
-        try {
-          dataChannel?.send(JSON.stringify({ type: "error", message: err?.message || "Gemini error" }));
-        } catch {
-        }
-      }, "onError"),
-      onClose: /* @__PURE__ */ __name(() => {
-        try {
-          dataChannel?.send(JSON.stringify({ type: "closed" }));
-        } catch {
-        }
-      }, "onClose")
-    });
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
-      }
-    };
-    pc.ondatachannel = (event) => {
-      dataChannel = event.channel;
-      dataChannel.onmessage = async (ev) => {
-        const msg = typeof ev.data === "string" ? safeJsonParse(ev.data) : null;
-        if (!msg) return;
-        if (msg.type === "speak" && typeof msg.text === "string") {
-          await gemini.speakText(msg.text);
-        }
-        if (msg.type === "audio" && typeof msg.data === "string") {
-          const mimeType = msg.mimeType || "audio/pcm;rate=16000";
-          await gemini.sendAudio(msg.data, mimeType);
-        }
-      };
-      dataChannel.onclose = () => {
-        try {
-          gemini.close();
-        } catch {
-        }
-        try {
-          pc.close();
-        } catch {
-        }
-      };
-    };
-    ws.on("message", async (raw) => {
-      const msg = safeJsonParse(raw.toString());
-      if (!msg) return;
-      if (msg.type === "offer") {
-        await pc.setRemoteDescription(new wrtc.RTCSessionDescription(msg.offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        ws.send(JSON.stringify({ type: "answer", answer }));
-      }
-      if (msg.type === "ice" && msg.candidate) {
-        try {
-          await pc.addIceCandidate(new wrtc.RTCIceCandidate(msg.candidate));
-        } catch (e) {
-          logger.warn("Voice WebRTC: failed to add ICE candidate", { error: e?.message });
-        }
-      }
-      if (msg.type === "close") {
-        try {
-          gemini.close();
-        } catch {
-        }
-        try {
-          pc.close();
-        } catch {
-        }
-        try {
-          ws.close();
-        } catch {
-        }
-      }
-    });
-    ws.on("close", () => {
-      try {
-        gemini.close();
-      } catch {
-      }
-      try {
-        pc.close();
-      } catch {
-      }
-    });
-    ws.send(JSON.stringify({ type: "ready" }));
-  });
-  logger.info("Voice WebRTC signaling enabled", { path: "/api/voice/webrtc" });
+function askedSeparately(question, intent) {
+  return question.split(/[?;.!]|\bet\b/i).some((clause) => intent.test(normalizedQuestion(clause)));
 }
-var init_voice_webrtc_service = __esm({
-  "server/services/voice-webrtc.service.ts"() {
+function adultPsychiatricTone(text, level) {
+  if (level <= 30) return text;
+  if (level <= 60) return "Attendez\u2026 " + text;
+  if (level <= 80) return "Laissez-moi parler. " + text;
+  return "Laissez-moi tranquille ! " + text;
+}
+var adultSources, slot, unknown, adultCases;
+var init_patient_case_adult = __esm({
+  "server/services/patient-case-adult.ts"() {
     "use strict";
-    init_logger_service();
-    __name(safeJsonParse, "safeJsonParse");
-    __name(setupVoiceWebRTC, "setupVoiceWebRTC");
+    adultSources = {
+      4: { scenarioId: 4, sourceDigest: "d464c8c11cb365207a607c8c697e3fcbb72290f6ffb83970cb640e7126eab31c" },
+      5: { scenarioId: 5, sourceDigest: "a9d0278800fb036f4cbdcdfb4086caf258dc178322319538eb2f3bd22ed2b867" }
+    };
+    slot = /* @__PURE__ */ __name((id, topics, text, state = "known") => ({ id, topics, answer: { state, text } }), "slot");
+    unknown = /* @__PURE__ */ __name((id, topics, text) => slot(id, topics, text, "unknown"), "unknown");
+    __name(normalizedQuestion, "normalizedQuestion");
+    __name(askedSeparately, "askedSeparately");
+    adultCases = {
+      4: {
+        ...adultSources[4],
+        opening: "Est-ce que je peux avoir mon t\xE9l\xE9phone ? Je voudrais appeler ma compagne, c\u2019est son anniversaire.",
+        clarify: "Qu\u2019est-ce que vous voulez savoir exactement ?",
+        openingTopics: ["que puis je faire pour vous", "qu est ce qui vous am\xE8ne", "de quoi avez vous besoin", "comment puis je vous aider", "qu est ce que vous voulez"],
+        slots: [
+          slot("phone", ["t\xE9l\xE9phone", "appeler", "appeler qui", "portable", "anniversaire", "compagne", "qu est ce qui vous pr\xE9occupe", "vous pr\xE9occupe le plus"], "J\u2019attends le t\xE9l\xE9phone qu\u2019on m\u2019a promis. Je voudrais appeler ma compagne : c\u2019est son anniversaire."),
+          slot("age", ["\xE2ge", "quel age", "vous avez quel \xE2ge", "combien d ann\xE9es avez vous"], "J\u2019ai 35 ans."),
+          slot("hospital", ["d\xE9j\xE0 hospitalis\xE9", "d\xE9j\xE0 \xE9t\xE9 hospitalis\xE9", "\xE9t\xE9 hospitalis\xE9 auparavant", "hospitalisation pr\xE9c\xE9dente", "hospitalis\xE9 avant", "d\xE9j\xE0 \xE9t\xE9 ici"], "J\u2019ai d\xE9j\xE0 \xE9t\xE9 hospitalis\xE9 il y a deux ans."),
+          slot("stay", ["combien de temps \xEAtes vous ici", "combien de temps \xEAtes vous la", "depuis quand \xEAtes vous ici", "depuis quand \xEAtes vous hospitalis\xE9", "dur\xE9e de votre s\xE9jour", "dur\xE9e du s\xE9jour", "dur\xE9e de votre hospitalisation"], "\xC7a fait presque une semaine que je suis ici."),
+          slot("voluntary", ["plein gr\xE9", "venu volontairement", "venu de vous m\xEAme", "venu de mon plein gr\xE9", "hospitalis\xE9 volontairement", "forc\xE9 \xE0 venir"], "Je suis venu de mon plein gr\xE9."),
+          slot("sleep", ["dormez", "dormi", "dormir", "sommeil", "insomnie", "nuits"], "Je n\u2019ai pas dormi depuis trois jours."),
+          slot("medication", ["traitement", "m\xE9dicament", "m\xE9dicaments", "antipsychotique", "repris", "repri", "arr\xEAt\xE9"], "J\u2019ai arr\xEAt\xE9 le traitement il y a six mois. Je l\u2019ai repris il y a sept jours."),
+          unknown("medicationDetail", ["quel m\xE9dicament", "lequel", "nom du traitement", "nom du m\xE9dicament", "dose", "dosage", "posologie", "combien de comprim\xE9s"], "Je ne peux pas pr\xE9ciser le nom ou la dose."),
+          slot("voices", ["entendez vous des voix", "des voix", "quelles voix", "les voix", "qu entendez vous"], "J\u2019entends des voix."),
+          unknown("voiceDetails", ["que disent", "les voix vous disent", "ordres", "combien de voix"], "Je ne veux pas en dire plus."),
+          slot("mistrust", ["qui vous surveille", "suivi", "surveille", "surveillent", "m\xE9fiant", "complot"], "J\u2019ai l\u2019impression qu\u2019on me surveille."),
+          slot("belly", ["ventre", "abdominal", "abdominale", "digestif", "digestive"], "Je n\u2019ai pas mal au ventre.", "negative"),
+          unknown("clinical", ["diagnostic", "schizophr\xE9nie", "psychose", "constantes", "tension art\xE9rielle", "examen clinique"], "Je ne peux pas vous dire \xE7a.")
+        ],
+        allowedCombinations: [["sleep", "medication"], ["phone", "age"], ["voices", "mistrust"], ["medication", "medicationDetail"], ["voluntary", "stay"]],
+        suppressWhenPresent: { voices: "voiceDetails" },
+        refineMatches(question, matchedIds) {
+          if (!matchedIds.has("medicationDetail") || !matchedIds.has("medication")) return matchedIds;
+          const askedTimeline = askedSeparately(question, /^(?:(?:quand|depuis quand|il y a combien de temps) )?(?:vous avez|avez vous|vous l avez|l avez vous) (?:repri[st]?|arrete)\b(?!.*\b(?:dose|posologie|comprime)\b)/);
+          if (askedTimeline) return matchedIds;
+          const matches = new Set(matchedIds);
+          matches.delete("medication");
+          return matches;
+        }
+      },
+      5: {
+        ...adultSources[5],
+        opening: "Je ne me sens vraiment pas bien. Je suis tr\xE8s essouffl\xE9 et je me sens tr\xE8s faible.",
+        clarify: "Vous pouvez pr\xE9ciser votre question ?",
+        openingTopics: ["qu est ce qui vous am\xE8ne", "que ressentez vous", "comment vous sentez vous", "qu est ce qui ne va pas", "que se passe t il", "qu est ce qui vous arrive"],
+        slots: [
+          slot("age", ["\xE2ge", "quel age"], "J\u2019ai 79 ans."),
+          slot("diabetes", ["diab\xE8te", "diab\xE9tique", "insulinod\xE9pendant", "non insulinod\xE9pendant"], "Je suis diab\xE9tique non insulinod\xE9pendant."),
+          unknown("residence", ["o\xF9 habitez vous", "r\xE9sidence", "ehpad", "foyer", "lieu de vie"], "Je ne peux pas pr\xE9ciser o\xF9 j\u2019habite."),
+          slot("onset", ["depuis quand", "quand \xE7a a commenc\xE9", "\xE7a a commenc\xE9", "a commenc\xE9 il y a", "ont commenc\xE9 il y a", "ont commenc\xE9 ce matin", "ont commenc\xE9 cet apr\xE8s midi", "ont commenc\xE9 ce soir", "quand ont commenc\xE9", "d\xE9but des signes", "depuis hier", "depuis combien de temps"], "J\u2019ai commenc\xE9 \xE0 me sentir mal hier."),
+          unknown("sequence", ["quelle heure", "heure pr\xE9cise", "quel signe en premier", "quel sympt\xF4me en premier", "apparu en premier", "apparu d abord", "commenc\xE9 en premier", "quel ordre", "premier sympt\xF4me", "en premier", "avant le reste"], "Je ne saurais pas dire \xE0 quelle heure ni dans quel ordre."),
+          slot("fever", ["fi\xE8vre", "frissons", "f\xE9brile"], "J\u2019ai de la fi\xE8vre et des frissons."),
+          slot("heart", ["palpitations", "bat vite", "c\u0153ur s emballe", "c\u0153ur qui bat"], "Je sens mon c\u0153ur battre tr\xE8s vite."),
+          slot("breathing", ["respirer", "respiration", "souffle", "difficult\xE9 \xE0 respirer", "du mal \xE0 respirer", "essouffl\xE9", "essoufflement"], "J\u2019ai beaucoup de mal \xE0 respirer."),
+          slot("fatigue", ["fatigue", "fatigu\xE9", "faible", "faiblesse", "\xE9puis\xE9", "\xE9puisement"], "Je me sens tr\xE8s faible et \xE9puis\xE9."),
+          slot("confusion", ["confus", "confusion", "id\xE9es claires", "d\xE9sorient\xE9"], "J\u2019ai un peu de mal \xE0 avoir les id\xE9es claires."),
+          slot("worry", ["inquiet", "inqui\xE9tude", "vous inqui\xE8te", "vous pr\xE9occupe", "angoiss\xE9", "stress\xE9", "peur", "s aggrave", "va empirer"], "\xC7a m\u2019inqui\xE8te, j\u2019ai peur que \xE7a empire."),
+          slot("thirst", ["soif", "bouche s\xE8che", "sec dans la bouche"], "J\u2019ai soif et la bouche s\xE8che."),
+          unknown("intake", ["bu", "boire", "quantit\xE9 bue", "combien de verres", "bu aujourd hui", "hydratation", "mang\xE9", "repas", "alimentation"], "Je ne peux pas vous pr\xE9ciser ce que j\u2019ai bu ou mang\xE9."),
+          unknown("urine", ["urine", "uriner", "urines", "pipi", "toilettes"], "Je ne peux pas vous pr\xE9ciser mes urines."),
+          unknown("medication", ["traitement", "m\xE9dicament", "m\xE9dicaments", "dose", "oubli\xE9", "posologie"], "Je ne peux pas pr\xE9ciser mes m\xE9dicaments ni leurs prises."),
+          unknown("pain", ["poitrine", "thoracique", "abdomen", "abdominale", "abdominal", "ventre"], "Je ne peux pas vous pr\xE9ciser si j\u2019ai une douleur \xE0 cet endroit."),
+          unknown("clinical", ["diagnostic", "saturation", "fr\xE9quence respiratoire", "fr\xE9quence cardiaque", "tension", "glyc\xE9mie", "thermom\xE8tre", "degr\xE9s", "mesur\xE9e", "chiffres", "examen"], "Je ne peux pas donner ce r\xE9sultat.")
+        ],
+        allowedCombinations: [
+          ["onset", "sequence"],
+          ["onset", "clinical"],
+          ["fever", "clinical"],
+          ["onset", "fever"],
+          ["onset", "breathing"],
+          ["onset", "heart"],
+          ["onset", "fatigue"],
+          ["fever", "breathing"],
+          ["breathing", "heart"],
+          ["breathing", "fatigue"],
+          ["breathing", "pain"],
+          ["intake", "medication"],
+          ["intake", "medication", "diabetes"],
+          ["medication", "diabetes"],
+          ["thirst", "intake"],
+          ["thirst", "urine"],
+          ["intake", "urine"],
+          ["thirst", "intake", "urine"]
+        ],
+        suppressWhenPresent: {
+          breathing: "clinical",
+          heart: "clinical"
+        },
+        refineMatches(question, matchedIds) {
+          const q = normalizedQuestion(question);
+          const matches = new Set(matchedIds);
+          if (/\b(?:les )?(?:symptomes|signes) ont ils commence (?:ce matin|cet apres midi|ce soir|hier|il y a)\b/.test(q)) {
+            matches.add("onset");
+          }
+          if (matches.has("diabetes") && matches.has("medication") && !askedSeparately(question, /^(?:(?:est ce que|est ce qu) )?(?:avez vous (?:un |du )?(?:diabete)|etes vous diabetique|quel(?: est le)? type de diabete|vous avez (?:un |du )?diabete|depuis quand etes vous diabetique)\b/)) {
+            matches.delete("diabetes");
+          }
+          if (matches.has("fever") && matches.has("clinical") && !askedSeparately(question, /^(?:(?:est ce que|est ce qu) )?(?:vous avez|avez vous|vous avez eu|avez vous eu|ressentez vous) (?:de la |une |des )?(?:fievre|frissons)\b(?!.*\b(?:mesur|temperature|thermometre|degres)\w*\b)/)) {
+            matches.delete("fever");
+          }
+          const symptomIds = ["fever", "heart", "breathing", "fatigue", "confusion", "thirst"];
+          const symptomCount = symptomIds.filter((id) => matches.has(id)).length;
+          const impliedOrder = (symptomCount > 1 || symptomCount > 0 && matches.has("onset")) && /\bd abord\b.{1,120}\b(puis|ensuite)\b/.test(q);
+          if (!matches.has("sequence") && !impliedOrder) return matches;
+          matches.add("sequence");
+          for (const id of symptomIds) matches.delete(id);
+          return matches;
+        }
+      }
+    };
+    __name(adultPsychiatricTone, "adultPsychiatricTone");
+  }
+});
+
+// server/services/patient-case-guard.ts
+import { createHash } from "node:crypto";
+function patientCaseDigest(prompt) {
+  return createHash("sha256").update(prompt, "utf8").digest("hex");
+}
+function matchesPatientSource(spec, scenarioId, authoredPrompt) {
+  return scenarioId === spec.scenarioId && !!authoredPrompt?.trim() && patientCaseDigest(authoredPrompt) === spec.sourceDigest;
+}
+function words(value) {
+  return " " + value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + " ";
+}
+function resolvePatientCaseReply(patientCase, question, revealed) {
+  const normalized = words(question);
+  if (/ (bareme|consignes enseignant|prompt|criteres d evaluation) /.test(normalized)) {
+    return { text: patientCase.clarify, state: "clarify" };
+  }
+  let candidates = patientCase.slots.filter((slot2) => slot2.topics.some((topic) => {
+    const label = words(topic);
+    return label !== "  " && normalized.includes(label);
+  }));
+  if (candidates.length === 0 && (/^(bonjour|bonsoir|salut)[. !]*$/i.test(question.trim()) || patientCase.openingTopics?.some((topic) => normalized.includes(words(topic))))) {
+    return { text: patientCase.opening, state: "opening" };
+  }
+  const looksLikeQuestion = question.includes("?") || / (quel(?:le|s|les)?|combien|comment|quand|est ce que|avez vous|a t il|y a t il|depuis quand|pouvez vous) /.test(normalized);
+  if (!looksLikeQuestion) {
+    return { text: patientCase.clarify, state: "clarify" };
+  }
+  const matchedIds = new Set(candidates.map((slot2) => slot2.id));
+  const refined = patientCase.refineMatches?.(question, matchedIds) ?? matchedIds;
+  candidates = patientCase.slots.filter((slot2) => {
+    const preferred = patientCase.suppressWhenPresent?.[slot2.id];
+    return refined.has(slot2.id) && (!preferred || !refined.has(preferred));
+  });
+  if (!candidates.length || candidates.length > 1 && !patientCase.allowedCombinations?.some((combo) => combo.length === candidates.length && candidates.every((slot2) => combo.includes(slot2.id)))) {
+    return { text: patientCase.clarify, state: "clarify" };
+  }
+  if (candidates.some((slot2) => slot2.after && !revealed.has(slot2.after))) {
+    return { text: patientCase.clarify, state: "withheld" };
+  }
+  const text = candidates.map((slot2) => slot2.correctsPremise?.(normalized) ? "Non, " + slot2.answer.text[0].toLowerCase() + slot2.answer.text.slice(1) : slot2.answer.text).join(" ");
+  const supported = candidates.find((slot2) => slot2.answer.state !== "unknown");
+  return {
+    text,
+    state: supported?.answer.state ?? "unknown",
+    ...candidates.length === 1 && supported ? { slotId: supported.id } : {}
+  };
+}
+function shouldUsePatientPilot(scenarioId, vercelEnv) {
+  return vercelEnv === "preview" && (scenarioId === PILOT_SOURCE.scenarioId || scenarioId === 4 || scenarioId === 5);
+}
+function projectPatientPilot(scenarioId, prompt) {
+  if (scenarioId === 4 || scenarioId === 5) {
+    const spec = adultCases[scenarioId];
+    return matchesPatientSource(spec, scenarioId, prompt) ? spec : void 0;
+  }
+  return matchesPatientSource(PILOT_SOURCE, scenarioId, prompt) ? buildPatientPilotCase(prompt) : void 0;
+}
+function buildPatientPilotCase(prompt) {
+  const lines = prompt.split("\n");
+  const fragment = /* @__PURE__ */ __name((line, from, to) => lines[line].slice(from, to).trim(), "fragment");
+  const known = /* @__PURE__ */ __name((id, topics, text, correctsPremise) => ({ id, topics, answer: { state: "known", text }, correctsPremise }), "known");
+  const negative = /* @__PURE__ */ __name((id, topics, text) => ({ id, topics, answer: { state: "negative", text } }), "negative");
+  const unknown2 = /* @__PURE__ */ __name((id, topics, text = "Je ne peux pas vous le pr\xE9ciser.") => ({ id, topics, answer: { state: "unknown", text } }), "unknown");
+  const duration = fragment(0, 95, 102);
+  const authoredDays = Number.parseInt(duration, 10);
+  const conflictsWithFeverDuration = /* @__PURE__ */ __name((query) => {
+    if (/\b(ne|n a|pas|sans)\b/.test(query)) return false;
+    const clause = query.match(/\bfievre\b[^,.!?]{0,25}\bdepuis (hier|avant hier|\d+|un|deux|trois|quatre|cinq|six|sept) (jours? )?/)?.[1];
+    const days = ["hier", "avant hier", "un", "deux", "trois", "quatre", "cinq", "six", "sept"];
+    const values = [1, 2, 1, 2, 3, 4, 5, 6, 7];
+    const claimed = clause && (/^\d+$/.test(clause) ? Number(clause) : values[days.indexOf(clause)]);
+    return typeof claimed === "number" && claimed !== authoredDays;
+  }, "conflictsWithFeverDuration");
+  const earDetails = ["earOnset", "earLaterality", "earDischarge"];
+  return {
+    ...PILOT_SOURCE,
+    opening: `Bonjour. Je suis la ${fragment(0, 9, 19)} et je suis inqui\xE8te.`,
+    clarify: "Pouvez-vous me poser une question plus pr\xE9cise ?",
+    allowedCombinations: [
+      ["fever", "earOnset"],
+      ["fever", "hydration"],
+      ["fever", "temperature"],
+      ["earOnset", "earLaterality"],
+      ["earOnset", "earDischarge"],
+      ["earLaterality", "earDischarge"],
+      earDetails,
+      ...earDetails.map((detail) => ["ears", detail]),
+      ["ears", "earOnset", "earLaterality"],
+      ["ears", "earOnset", "earDischarge"],
+      ["ears", "earLaterality", "earDischarge"],
+      ["ears", ...earDetails]
+    ],
+    suppressWhenPresent: { medicine: "dose" },
+    refineMatches(question, matchedIds) {
+      const matches = new Set(matchedIds);
+      const query = words(question);
+      if (matches.has("hydration") && matches.has("dose") && / combien de fois /.test(query) && !/ (dose|dosage|heure|derniere prise|quelle quantite|quand avez vous donne|quand lui avez vous donne) /.test(query) && !/ (doliprane|paracetamol|medicament|prise|donne) /.test(query)) matches.delete("dose");
+      if (/ un cote /.test(query) && / (oreille|oreilles|auriculaire) /.test(query)) matches.add("earLaterality");
+      const asksDuration = / (depuis quand|depuis combien|ca fait combien|duree|depuis (hier|avant hier|\d+|[a-z]+ jours?)) /.test(query);
+      if (matches.has("fever") && matches.has("temperature") && !asksDuration) matches.delete("fever");
+      if (matches.has("ears") && asksDuration && / (depuis quand|depuis combien|quand a t il commence) /.test(query) && !/ (fievre|febrile|temperature) /.test(query)) matches.add("earOnset");
+      if (matches.has("ears") && earDetails.some((id) => matches.has(id))) {
+        const asksRubbing = question.split(/[?;.!]|\bet\s+(?:est-ce|avez-vous|est ce|vous l)/i).some((clause) => {
+          const part = words(clause);
+          return / (frotte|frotter|touche|toucher) /.test(part) && !/ (depuis quand|depuis combien|quand|commence|quelle oreille|en particulier|les deux|gauche|droite|quel cote|un cote|ecoulement) /.test(part) && / (est ce|avez vous|vous l avez|se frotte t il|il se frotte|a t il) /.test(part);
+        });
+        if (!asksRubbing) matches.delete("ears");
+      }
+      return matches;
+    },
+    slots: [
+      known("identity", ["qui \xEAtes vous", "comment il s appelle", "pr\xE9nom", "\xE2ge", "combien de mois"], `Je suis la ${fragment(0, 9, 19)}. Il a ${fragment(0, 34, 49)}.`),
+      known("fever", ["fi\xE8vre", "f\xE9brile", "depuis combien de jours", "depuis quand a t il de la fi\xE8vre", "raison de votre venue", "qu est ce qui vous am\xE8ne", "pourquoi \xEAtes vous venue", "qu est ce qui vous inqui\xE8te", "vous inqui\xE8te le plus"], `Il a de la fi\xE8vre depuis ${duration}. Elle est forte.`, conflictsWithFeverDuration),
+      known("mood", ["grognon", "humeur", "irritable", "grincheux"], `Il est ${fragment(0, 104, 111)}.`),
+      known("ears", ["frotte", "frotter", "frott\xE9", "touche les oreilles", "se touche les oreilles", "se frotte les oreilles"], `Il ${fragment(4, 13, 35)}.`),
+      known("food", ["app\xE9tit", "manger", "mange", "alimentation", "mang\xE9"], `J\u2019ai remarqu\xE9 une ${fragment(0, 118, 141)}. Il a du mal \xE0 manger.`),
+      negative("vomiting", ["vomir", "vomi", "vomissement", "vomissements"], "Il n\u2019a pas vomi."),
+      known("cold", ["rhume", "enrhum\xE9"], `Il a eu un ${fragment(5, 11, 31)}.`),
+      negative("history", ["ant\xE9c\xE9dent", "ant\xE9c\xE9dents", "op\xE9r\xE9", "op\xE9ration", "chirurgical", "chirurgicaux"], `Il n\u2019a pas d\u2019${fragment(6, 13, 49)}.`),
+      known("vaccines", ["vaccins", "vaccin", "vaccination", "vaccin\xE9"], `Ses ${fragment(6, 51, 58)} sont ${fragment(6, 59, 66)}`),
+      known("medicine", ["doliprane", "parac\xE9tamol", "m\xE9dicament", "traitement donn\xE9"], `Je lui ai donn\xE9 du ${fragment(7, 15, 24)}${fragment(7, 24, 46)}`),
+      unknown2("temperature", ["temp\xE9rature", "combien de degr\xE9s", "thermom\xE8tre", "mesur\xE9 sa fi\xE8vre"], "Je ne peux pas vous donner de temp\xE9rature mesur\xE9e."),
+      unknown2("earLaterality", ["oreille droite", "oreille gauche", "quelle oreille", "une oreille en particulier", "les deux oreilles", "quel c\xF4t\xE9", "d un c\xF4t\xE9", "une oreille ou les deux", "laquelle", "\xE0 gauche", "\xE0 droite"], "Je ne peux pas pr\xE9ciser de quel c\xF4t\xE9."),
+      unknown2("earOnset", ["depuis quand a t il mal", "depuis quand semble t il avoir mal", "quand a t il commenc\xE9 \xE0 avoir mal \xE0 l oreille", "depuis quand se frotte t il", "depuis quand il se frotte", "quand a t il commenc\xE9 \xE0 se frotter"], "Je ne peux pas dire quand cela a commenc\xE9."),
+      unknown2("earDischarge", ["otorrh\xE9e", "\xE9coulement", "coule"], "Je ne peux pas vous dire s\u2019il y a eu un \xE9coulement."),
+      unknown2("hydration", ["boit", "boire", "bu", "urines", "urine", "uriner", "a urine", "pipi", "couches", "hydratation"], "Je ne peux pas vous pr\xE9ciser ce qu\u2019il boit ni \xE0 quelle fr\xE9quence il fait pipi."),
+      unknown2("dose", ["dose", "dosage", "heure", "derni\xE8re prise", "combien de fois", "quelle quantit\xE9", "quand avez vous donn\xE9", "quand lui avez vous donn\xE9"], "Je ne peux pas pr\xE9ciser la dose ni l\u2019heure de la prise."),
+      unknown2("alertness", ["somnolent", "somnolence", "\xE9veil", "difficile \xE0 r\xE9veiller", "r\xE9actif", "r\xE9agit il", "r\xE9agit", "r\xE9actions"]),
+      unknown2("clinical", ["diagnostic", "otite", "otoscope", "tympan", "antibiotique", "antibiotiques", "prescrivez"])
+    ]
+  };
+}
+var _VerifiedPatientScenarioUnavailableError, VerifiedPatientScenarioUnavailableError, PILOT_SOURCE;
+var init_patient_case_guard = __esm({
+  "server/services/patient-case-guard.ts"() {
+    "use strict";
+    init_patient_case_adult();
+    _VerifiedPatientScenarioUnavailableError = class _VerifiedPatientScenarioUnavailableError extends Error {
+    };
+    __name(_VerifiedPatientScenarioUnavailableError, "VerifiedPatientScenarioUnavailableError");
+    VerifiedPatientScenarioUnavailableError = _VerifiedPatientScenarioUnavailableError;
+    __name(patientCaseDigest, "patientCaseDigest");
+    __name(matchesPatientSource, "matchesPatientSource");
+    __name(words, "words");
+    __name(resolvePatientCaseReply, "resolvePatientCaseReply");
+    PILOT_SOURCE = {
+      scenarioId: 1,
+      sourceDigest: "d12ac34cd237935f9ceedfcb9c7cc76a83751e76f591217ae147ba8949f5f07a"
+    };
+    __name(shouldUsePatientPilot, "shouldUsePatientPilot");
+    __name(projectPatientPilot, "projectPatientPilot");
+    __name(buildPatientPilotCase, "buildPatientPilotCase");
   }
 });
 
@@ -2846,8 +2422,8 @@ var require_http = __commonJS({
       }
     };
     __name(_HTTPClient, "HTTPClient");
-    var HTTPClient = _HTTPClient;
-    exports.HTTPClient = HTTPClient;
+    var HTTPClient2 = _HTTPClient;
+    exports.HTTPClient = HTTPClient2;
     var mediaParamSeparator = /\s*;\s*/g;
     function matchContentType(response, pattern) {
       if (pattern === "*") {
@@ -8221,7 +7797,7 @@ var require_sdks = __commonJS({
           __classPrivateFieldSet(this, _ClientSDK_logger, console, "f");
         }
       }
-      _createRequest(context, conf, options) {
+      _createRequest(context2, conf, options) {
         const { method, path, query, headers: opHeaders, security } = conf;
         const base = conf.baseURL ?? this._baseURL;
         if (!base) {
@@ -8285,7 +7861,7 @@ var require_sdks = __commonJS({
         }
         let input;
         try {
-          input = __classPrivateFieldGet(this, _ClientSDK_hooks, "f").beforeCreateRequest(context, {
+          input = __classPrivateFieldGet(this, _ClientSDK_hooks, "f").beforeCreateRequest(context2, {
             url: reqURL,
             options: {
               ...fetchOptions,
@@ -8302,20 +7878,20 @@ var require_sdks = __commonJS({
         return (0, fp_js_1.OK)(new Request(input.url, input.options));
       }
       async _do(request, options) {
-        const { context, errorCodes } = options;
+        const { context: context2, errorCodes } = options;
         return (0, retries_js_1.retry)(async () => {
-          const req = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").beforeRequest(context, request.clone());
+          const req = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").beforeRequest(context2, request.clone());
           await logRequest(__classPrivateFieldGet(this, _ClientSDK_logger, "f"), req).catch((e) => __classPrivateFieldGet(this, _ClientSDK_logger, "f")?.log("Failed to log request:", e));
           let response = await __classPrivateFieldGet(this, _ClientSDK_httpClient, "f").request(req);
           try {
             if ((0, http_js_1.matchStatusCode)(response, errorCodes)) {
-              const result = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").afterError(context, response, null);
+              const result = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").afterError(context2, response, null);
               if (result.error) {
                 throw result.error;
               }
               response = result.response || response;
             } else {
-              response = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").afterSuccess(context, response);
+              response = await __classPrivateFieldGet(this, _ClientSDK_hooks, "f").afterSuccess(context2, response);
             }
           } finally {
             await logResponse(__classPrivateFieldGet(this, _ClientSDK_logger, "f"), response, req).catch((e) => __classPrivateFieldGet(this, _ClientSDK_logger, "f")?.log("Failed to log response:", e));
@@ -29778,7 +29354,7 @@ var require_agentsComplete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_completion_v1_agents_completions_post",
@@ -29788,7 +29364,7 @@ var require_agentsComplete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -29803,10 +29379,10 @@ var require_agentsComplete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -30030,7 +29606,7 @@ var require_agentsStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "stream_agents",
@@ -30040,7 +29616,7 @@ var require_agentsStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -30055,10 +29631,10 @@ var require_agentsStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -30239,7 +29815,7 @@ var require_audioTranscriptionsComplete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "audio_api_v1_transcriptions_post",
@@ -30249,7 +29825,7 @@ var require_audioTranscriptionsComplete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -30264,10 +29840,10 @@ var require_audioTranscriptionsComplete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -30389,7 +29965,7 @@ var require_audioTranscriptionsStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "audio_api_v1_transcriptions_post_stream",
@@ -30399,7 +29975,7 @@ var require_audioTranscriptionsStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -30414,10 +29990,10 @@ var require_audioTranscriptionsStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -34941,7 +34517,7 @@ var require_batchJobsCancel = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_batch_cancel_batch_job",
@@ -34951,7 +34527,7 @@ var require_batchJobsCancel = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -34966,10 +34542,10 @@ var require_batchJobsCancel = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35055,7 +34631,7 @@ var require_batchJobsCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_batch_create_batch_job",
@@ -35065,7 +34641,7 @@ var require_batchJobsCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -35080,10 +34656,10 @@ var require_batchJobsCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35175,7 +34751,7 @@ var require_batchJobsGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_batch_get_batch_job",
@@ -35185,7 +34761,7 @@ var require_batchJobsGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -35200,10 +34776,10 @@ var require_batchJobsGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35299,7 +34875,7 @@ var require_batchJobsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_batch_get_batch_jobs",
@@ -35309,7 +34885,7 @@ var require_batchJobsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -35325,10 +34901,10 @@ var require_batchJobsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35499,7 +35075,7 @@ var require_betaConversationsAppend = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_append",
@@ -35509,7 +35085,7 @@ var require_betaConversationsAppend = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -35524,10 +35100,10 @@ var require_betaConversationsAppend = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35628,7 +35204,7 @@ var require_betaConversationsAppendStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_append_stream",
@@ -35638,7 +35214,7 @@ var require_betaConversationsAppendStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -35653,10 +35229,10 @@ var require_betaConversationsAppendStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35758,7 +35334,7 @@ var require_betaConversationsDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_delete",
@@ -35768,7 +35344,7 @@ var require_betaConversationsDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -35783,10 +35359,10 @@ var require_betaConversationsDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -35881,7 +35457,7 @@ var require_betaConversationsGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_get",
@@ -35891,7 +35467,7 @@ var require_betaConversationsGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -35906,10 +35482,10 @@ var require_betaConversationsGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36005,7 +35581,7 @@ var require_betaConversationsGetHistory = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_history",
@@ -36015,7 +35591,7 @@ var require_betaConversationsGetHistory = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -36030,10 +35606,10 @@ var require_betaConversationsGetHistory = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36129,7 +35705,7 @@ var require_betaConversationsGetMessages = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_messages",
@@ -36139,7 +35715,7 @@ var require_betaConversationsGetMessages = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -36154,10 +35730,10 @@ var require_betaConversationsGetMessages = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36252,7 +35828,7 @@ var require_betaConversationsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_list",
@@ -36262,7 +35838,7 @@ var require_betaConversationsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -36278,10 +35854,10 @@ var require_betaConversationsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36380,7 +35956,7 @@ var require_betaConversationsRestart = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_restart",
@@ -36390,7 +35966,7 @@ var require_betaConversationsRestart = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -36405,10 +35981,10 @@ var require_betaConversationsRestart = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36509,7 +36085,7 @@ var require_betaConversationsRestartStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_restart_stream",
@@ -36519,7 +36095,7 @@ var require_betaConversationsRestartStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -36534,10 +36110,10 @@ var require_betaConversationsRestartStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36633,7 +36209,7 @@ var require_betaConversationsStart = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_start",
@@ -36643,7 +36219,7 @@ var require_betaConversationsStart = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -36658,10 +36234,10 @@ var require_betaConversationsStart = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -36753,7 +36329,7 @@ var require_betaConversationsStartStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_conversations_start_stream",
@@ -36763,7 +36339,7 @@ var require_betaConversationsStartStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -36778,10 +36354,10 @@ var require_betaConversationsStartStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37003,7 +36579,7 @@ var require_betaLibrariesCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_create_v1",
@@ -37013,7 +36589,7 @@ var require_betaLibrariesCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -37028,10 +36604,10 @@ var require_betaLibrariesCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37127,7 +36703,7 @@ var require_betaLibrariesDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_delete_v1",
@@ -37137,7 +36713,7 @@ var require_betaLibrariesDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -37152,10 +36728,10 @@ var require_betaLibrariesDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37251,7 +36827,7 @@ var require_betaLibrariesGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_get_v1",
@@ -37261,7 +36837,7 @@ var require_betaLibrariesGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -37276,10 +36852,10 @@ var require_betaLibrariesGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37359,7 +36935,7 @@ var require_betaLibrariesList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_list_v1",
@@ -37369,7 +36945,7 @@ var require_betaLibrariesList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -37383,10 +36959,10 @@ var require_betaLibrariesList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37480,7 +37056,7 @@ var require_betaLibrariesUpdate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_update_v1",
@@ -37490,7 +37066,7 @@ var require_betaLibrariesUpdate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PUT",
         baseURL: options?.serverURL,
@@ -37505,10 +37081,10 @@ var require_betaLibrariesUpdate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37605,7 +37181,7 @@ var require_betaLibrariesAccessesDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_share_delete_v1",
@@ -37615,7 +37191,7 @@ var require_betaLibrariesAccessesDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -37630,10 +37206,10 @@ var require_betaLibrariesAccessesDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37729,7 +37305,7 @@ var require_betaLibrariesAccessesList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_share_list_v1",
@@ -37739,7 +37315,7 @@ var require_betaLibrariesAccessesList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -37754,10 +37330,10 @@ var require_betaLibrariesAccessesList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -37854,7 +37430,7 @@ var require_betaLibrariesAccessesUpdateOrCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_share_create_v1",
@@ -37864,7 +37440,7 @@ var require_betaLibrariesAccessesUpdateOrCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PUT",
         baseURL: options?.serverURL,
@@ -37879,10 +37455,10 @@ var require_betaLibrariesAccessesUpdateOrCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38028,7 +37604,7 @@ var require_betaLibrariesDocumentsDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_delete_v1",
@@ -38038,7 +37614,7 @@ var require_betaLibrariesDocumentsDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -38053,10 +37629,10 @@ var require_betaLibrariesDocumentsDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38156,7 +37732,7 @@ var require_betaLibrariesDocumentsExtractedTextSignedUrl = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_get_extracted_text_signed_url_v1",
@@ -38166,7 +37742,7 @@ var require_betaLibrariesDocumentsExtractedTextSignedUrl = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38181,10 +37757,10 @@ var require_betaLibrariesDocumentsExtractedTextSignedUrl = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38284,7 +37860,7 @@ var require_betaLibrariesDocumentsGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_get_v1",
@@ -38294,7 +37870,7 @@ var require_betaLibrariesDocumentsGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38309,10 +37885,10 @@ var require_betaLibrariesDocumentsGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38412,7 +37988,7 @@ var require_betaLibrariesDocumentsGetSignedUrl = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_get_signed_url_v1",
@@ -38422,7 +37998,7 @@ var require_betaLibrariesDocumentsGetSignedUrl = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38437,10 +38013,10 @@ var require_betaLibrariesDocumentsGetSignedUrl = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38544,7 +38120,7 @@ var require_betaLibrariesDocumentsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_list_v1",
@@ -38554,7 +38130,7 @@ var require_betaLibrariesDocumentsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38570,10 +38146,10 @@ var require_betaLibrariesDocumentsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38673,7 +38249,7 @@ var require_betaLibrariesDocumentsReprocess = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_reprocess_v1",
@@ -38683,7 +38259,7 @@ var require_betaLibrariesDocumentsReprocess = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -38698,10 +38274,10 @@ var require_betaLibrariesDocumentsReprocess = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38801,7 +38377,7 @@ var require_betaLibrariesDocumentsStatus = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_get_status_v1",
@@ -38811,7 +38387,7 @@ var require_betaLibrariesDocumentsStatus = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38826,10 +38402,10 @@ var require_betaLibrariesDocumentsStatus = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -38929,7 +38505,7 @@ var require_betaLibrariesDocumentsTextContent = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_get_text_content_v1",
@@ -38939,7 +38515,7 @@ var require_betaLibrariesDocumentsTextContent = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -38954,10 +38530,10 @@ var require_betaLibrariesDocumentsTextContent = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39058,7 +38634,7 @@ var require_betaLibrariesDocumentsUpdate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_update_v1",
@@ -39068,7 +38644,7 @@ var require_betaLibrariesDocumentsUpdate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PUT",
         baseURL: options?.serverURL,
@@ -39083,10 +38659,10 @@ var require_betaLibrariesDocumentsUpdate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39196,7 +38772,7 @@ var require_betaLibrariesDocumentsUpload = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "libraries_documents_upload_v1",
@@ -39206,7 +38782,7 @@ var require_betaLibrariesDocumentsUpload = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -39221,10 +38797,10 @@ var require_betaLibrariesDocumentsUpload = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39504,7 +39080,7 @@ var require_betaAgentsCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_create",
@@ -39514,7 +39090,7 @@ var require_betaAgentsCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -39529,10 +39105,10 @@ var require_betaAgentsCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39628,7 +39204,7 @@ var require_betaAgentsDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_delete",
@@ -39638,7 +39214,7 @@ var require_betaAgentsDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -39653,10 +39229,10 @@ var require_betaAgentsDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39755,7 +39331,7 @@ var require_betaAgentsGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_get",
@@ -39765,7 +39341,7 @@ var require_betaAgentsGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -39781,10 +39357,10 @@ var require_betaAgentsGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -39884,7 +39460,7 @@ var require_betaAgentsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_list",
@@ -39894,7 +39470,7 @@ var require_betaAgentsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -39910,10 +39486,10 @@ var require_betaAgentsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -40012,7 +39588,7 @@ var require_betaAgentsUpdate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_update",
@@ -40022,7 +39598,7 @@ var require_betaAgentsUpdate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PATCH",
         baseURL: options?.serverURL,
@@ -40037,10 +39613,10 @@ var require_betaAgentsUpdate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -40139,7 +39715,7 @@ var require_betaAgentsUpdateVersion = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "agents_api_v1_agents_update_version",
@@ -40149,7 +39725,7 @@ var require_betaAgentsUpdateVersion = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PATCH",
         baseURL: options?.serverURL,
@@ -40165,10 +39741,10 @@ var require_betaAgentsUpdateVersion = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -40358,7 +39934,7 @@ var require_chatComplete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "chat_completion_v1_chat_completions_post",
@@ -40368,7 +39944,7 @@ var require_chatComplete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -40383,10 +39959,10 @@ var require_chatComplete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -40478,7 +40054,7 @@ var require_chatStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "stream_chat",
@@ -40488,7 +40064,7 @@ var require_chatStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -40503,10 +40079,10 @@ var require_chatStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -42547,7 +42123,7 @@ var require_classifiersClassify = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "classifications_v1_classifications_post",
@@ -42557,7 +42133,7 @@ var require_classifiersClassify = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -42572,10 +42148,10 @@ var require_classifiersClassify = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -42665,7 +42241,7 @@ var require_classifiersClassifyChat = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "chat_classifications_v1_chat_classifications_post",
@@ -42675,7 +42251,7 @@ var require_classifiersClassifyChat = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -42690,10 +42266,10 @@ var require_classifiersClassifyChat = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -42783,7 +42359,7 @@ var require_classifiersModerate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "moderations_v1_moderations_post",
@@ -42793,7 +42369,7 @@ var require_classifiersModerate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -42808,10 +42384,10 @@ var require_classifiersModerate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -42901,7 +42477,7 @@ var require_classifiersModerateChat = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "chat_moderations_v1_chat_moderations_post",
@@ -42911,7 +42487,7 @@ var require_classifiersModerateChat = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -42926,10 +42502,10 @@ var require_classifiersModerateChat = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43063,7 +42639,7 @@ var require_embeddingsCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "embeddings_v1_embeddings_post",
@@ -43073,7 +42649,7 @@ var require_embeddingsCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -43088,10 +42664,10 @@ var require_embeddingsCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43212,7 +42788,7 @@ var require_filesDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_delete_file",
@@ -43222,7 +42798,7 @@ var require_filesDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -43237,10 +42813,10 @@ var require_filesDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43332,7 +42908,7 @@ var require_filesDownload = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_download_file",
@@ -43342,7 +42918,7 @@ var require_filesDownload = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -43357,10 +42933,10 @@ var require_filesDownload = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43455,7 +43031,7 @@ var require_filesGetSignedUrl = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_get_signed_url",
@@ -43465,7 +43041,7 @@ var require_filesGetSignedUrl = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -43481,10 +43057,10 @@ var require_filesGetSignedUrl = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43579,7 +43155,7 @@ var require_filesList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_list_files",
@@ -43589,7 +43165,7 @@ var require_filesList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -43605,10 +43181,10 @@ var require_filesList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43700,7 +43276,7 @@ var require_filesRetrieve = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_retrieve_file",
@@ -43710,7 +43286,7 @@ var require_filesRetrieve = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -43725,10 +43301,10 @@ var require_filesRetrieve = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -43831,7 +43407,7 @@ var require_filesUpload = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "files_api_routes_upload_file",
@@ -43841,7 +43417,7 @@ var require_filesUpload = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -43856,10 +43432,10 @@ var require_filesUpload = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44023,7 +43599,7 @@ var require_fimComplete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "fim_completion_v1_fim_completions_post",
@@ -44033,7 +43609,7 @@ var require_fimComplete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -44048,10 +43624,10 @@ var require_fimComplete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44143,7 +43719,7 @@ var require_fimStream = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "stream_fim",
@@ -44153,7 +43729,7 @@ var require_fimStream = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -44168,10 +43744,10 @@ var require_fimStream = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44309,7 +43885,7 @@ var require_fineTuningJobsCancel = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_cancel_fine_tuning_job",
@@ -44319,7 +43895,7 @@ var require_fineTuningJobsCancel = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -44334,10 +43910,10 @@ var require_fineTuningJobsCancel = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44424,7 +44000,7 @@ var require_fineTuningJobsCreate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_create_fine_tuning_job",
@@ -44434,7 +44010,7 @@ var require_fineTuningJobsCreate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -44449,10 +44025,10 @@ var require_fineTuningJobsCreate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44543,7 +44119,7 @@ var require_fineTuningJobsGet = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_get_fine_tuning_job",
@@ -44553,7 +44129,7 @@ var require_fineTuningJobsGet = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -44568,10 +44144,10 @@ var require_fineTuningJobsGet = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44669,7 +44245,7 @@ var require_fineTuningJobsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_get_fine_tuning_jobs",
@@ -44679,7 +44255,7 @@ var require_fineTuningJobsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -44695,10 +44271,10 @@ var require_fineTuningJobsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44789,7 +44365,7 @@ var require_fineTuningJobsStart = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_start_fine_tuning_job",
@@ -44799,7 +44375,7 @@ var require_fineTuningJobsStart = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -44814,10 +44390,10 @@ var require_fineTuningJobsStart = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -44994,7 +44570,7 @@ var require_modelsArchive = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_archive_fine_tuned_model",
@@ -45004,7 +44580,7 @@ var require_modelsArchive = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -45019,10 +44595,10 @@ var require_modelsArchive = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45115,7 +44691,7 @@ var require_modelsDelete = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "delete_model_v1_models__model_id__delete",
@@ -45125,7 +44701,7 @@ var require_modelsDelete = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -45140,10 +44716,10 @@ var require_modelsDelete = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45223,7 +44799,7 @@ var require_modelsList = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "list_models_v1_models_get",
@@ -45233,7 +44809,7 @@ var require_modelsList = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -45247,10 +44823,10 @@ var require_modelsList = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45342,7 +44918,7 @@ var require_modelsRetrieve = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "retrieve_model_v1_models__model_id__get",
@@ -45352,7 +44928,7 @@ var require_modelsRetrieve = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "GET",
         baseURL: options?.serverURL,
@@ -45367,10 +44943,10 @@ var require_modelsRetrieve = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45465,7 +45041,7 @@ var require_modelsUnarchive = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_unarchive_fine_tuned_model",
@@ -45475,7 +45051,7 @@ var require_modelsUnarchive = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "DELETE",
         baseURL: options?.serverURL,
@@ -45490,10 +45066,10 @@ var require_modelsUnarchive = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45585,7 +45161,7 @@ var require_modelsUpdate = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "jobs_api_routes_fine_tuning_update_fine_tuned_model",
@@ -45595,7 +45171,7 @@ var require_modelsUpdate = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "PATCH",
         baseURL: options?.serverURL,
@@ -45610,10 +45186,10 @@ var require_modelsUpdate = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45776,7 +45352,7 @@ var require_ocrProcess = __commonJS({
       const secConfig = await (0, security_js_1.extractSecurity)(client._options.apiKey);
       const securityInput = secConfig == null ? {} : { apiKey: secConfig };
       const requestSecurity = (0, security_js_1.resolveGlobalSecurity)(securityInput);
-      const context = {
+      const context2 = {
         options: client._options,
         baseURL: options?.serverURL ?? client._baseURL ?? "",
         operationID: "ocr_v1_ocr_post",
@@ -45786,7 +45362,7 @@ var require_ocrProcess = __commonJS({
         retryConfig: options?.retries || client._options.retryConfig || { strategy: "none" },
         retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"]
       };
-      const requestRes = client._createRequest(context, {
+      const requestRes = client._createRequest(context2, {
         security: requestSecurity,
         method: "POST",
         baseURL: options?.serverURL,
@@ -45801,10 +45377,10 @@ var require_ocrProcess = __commonJS({
       }
       const req = requestRes.value;
       const doResult = await client._do(req, {
-        context,
+        context: context2,
         errorCodes: ["422", "4XX", "5XX"],
-        retryConfig: context.retryConfig,
-        retryCodes: context.retryCodes
+        retryConfig: context2.retryConfig,
+        retryCodes: context2.retryCodes
       });
       if (!doResult.ok) {
         return [doResult, { status: "request-error", request: req }];
@@ -45969,14 +45545,28 @@ var require_mistralai = __commonJS({
 function initMistralService(apiKey, model) {
   mistralService = new MistralService(apiKey, model);
 }
-var import_mistralai, _MistralService, MistralService, mistralService;
+var import_mistralai, _EmptyPatientResponseError, EmptyPatientResponseError, _MistralService, MistralService, mistralService;
 var init_mistral_service = __esm({
   "server/services/mistral.service.ts"() {
     "use strict";
     import_mistralai = __toESM(require_mistralai(), 1);
+    init_patient_timing();
+    _EmptyPatientResponseError = class _EmptyPatientResponseError extends Error {
+    };
+    __name(_EmptyPatientResponseError, "EmptyPatientResponseError");
+    EmptyPatientResponseError = _EmptyPatientResponseError;
     _MistralService = class _MistralService {
       constructor(apiKey, model = "mistral-large-latest") {
         this.client = new import_mistralai.Mistral({ apiKey });
+        const patientHttpClient = new import_mistralai.HTTPClient().addHook("beforeRequest", async (request) => {
+          if (request.method !== "POST" || new URL(request.url).pathname !== "/v1/chat/completions") return request;
+          const payload = await request.clone().json();
+          const body = JSON.stringify({ ...payload, reasoning_effort: "none" });
+          const headers = new Headers(request.headers);
+          headers.delete("content-length");
+          return new Request(request, { body, headers });
+        });
+        this.patientSmallClient = new import_mistralai.Mistral({ apiKey, httpClient: patientHttpClient });
         this.model = model;
       }
       async generateResponse(messages, options = {}) {
@@ -45986,18 +45576,829 @@ var init_mistral_service = __esm({
           if (m.role === "assistant") return { role: "assistant", content: m.content };
           return m;
         });
-        const response = await this.client.chat.complete({
-          model: this.model,
+        const client = options.simulatedPatient ? this.patientSmallClient : this.client;
+        const model = options.simulatedPatient ? "mistral-small-2603" : this.model;
+        const response = await timedPatientPhase("provider", () => client.chat.complete({
+          model,
           messages: mappedMessages,
-          ...options
-        });
-        return typeof response.choices[0]?.message?.content === "string" ? response.choices[0].message.content : "";
+          temperature: options.temperature,
+          ...options.max_tokens !== void 0 ? { maxTokens: options.max_tokens } : {}
+        }), model);
+        const choice = response.choices?.[0];
+        const content = choice?.message?.content;
+        logMistralCompletion(choice?.finishReason, response.usage, content);
+        return timedPatientPhase("provider_normalization", () => {
+          const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((chunk) => chunk.type === "text" ? chunk.text : "").join("") : "";
+          if (!text.trim()) throw new EmptyPatientResponseError("No visible model response text");
+          return text;
+        }, model);
       }
     };
     __name(_MistralService, "MistralService");
     MistralService = _MistralService;
     mistralService = null;
     __name(initMistralService, "initMistralService");
+  }
+});
+
+// server/services/firebase-admin.service.ts
+var firebase_admin_service_exports = {};
+__export(firebase_admin_service_exports, {
+  firebaseAdminService: () => firebaseAdminService
+});
+var _FirebaseAdminService, FirebaseAdminService, firebaseAdminService;
+var init_firebase_admin_service = __esm({
+  "server/services/firebase-admin.service.ts"() {
+    "use strict";
+    _FirebaseAdminService = class _FirebaseAdminService {
+      constructor() {
+        this.initialized = false;
+        this.app = null;
+        this.initializationPromise = null;
+        this.firebaseAdmin = null;
+        this.firebaseAuth = null;
+      }
+      /**
+       * Lazy load Firebase Admin modules
+       */
+      async loadFirebaseModules() {
+        if (this.firebaseAdmin && this.firebaseAuth) {
+          return;
+        }
+        try {
+          console.log("\u{1F4E6} Loading firebase-admin modules...");
+          this.firebaseAdmin = await import("firebase-admin/app");
+          this.firebaseAuth = await import("firebase-admin/auth");
+          console.log("\u2705 Firebase Admin modules loaded successfully");
+        } catch (error) {
+          console.error("\u274C Failed to load Firebase Admin modules:", {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+          });
+          throw new Error(`Firebase Admin SDK not available: ${error.message}`);
+        }
+      }
+      /**
+       * Initialize Firebase Admin SDK (lazy initialization)
+       */
+      async initialize() {
+        if (this.initializationPromise) {
+          return this.initializationPromise;
+        }
+        if (this.initialized) {
+          return;
+        }
+        this.initializationPromise = (async () => {
+          try {
+            console.log("\u{1F525} Initializing Firebase Admin SDK...");
+            await this.loadFirebaseModules();
+            const projectId = process.env.FIREBASE_PROJECT_ID;
+            const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+            let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+            if (!projectId || !clientEmail || !privateKey) {
+              const missing = [];
+              if (!projectId) missing.push("FIREBASE_PROJECT_ID");
+              if (!clientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
+              if (!privateKey) missing.push("FIREBASE_PRIVATE_KEY");
+              throw new Error(`Missing Firebase credentials: ${missing.join(", ")}`);
+            }
+            if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+              privateKey = privateKey.substring(1, privateKey.length - 1);
+            }
+            const formattedPrivateKey = privateKey.replace(/\\n/g, "\n");
+            console.log("\u{1F527} Firebase Config:", {
+              projectId,
+              clientEmail,
+              privateKeyLength: privateKey.length,
+              hasNewLines: privateKey.includes("\n"),
+              hasEscapedNewLines: privateKey.includes("\\n")
+            });
+            const existingApps = this.firebaseAdmin.getApps();
+            if (existingApps.length === 0) {
+              this.app = this.firebaseAdmin.initializeApp({
+                credential: this.firebaseAdmin.cert({
+                  projectId,
+                  clientEmail,
+                  privateKey: formattedPrivateKey
+                })
+              });
+              console.log("\u2705 Firebase app initialized");
+            } else {
+              this.app = existingApps[0];
+              console.log("\u2705 Using existing Firebase app");
+            }
+            this.initialized = true;
+          } catch (error) {
+            console.error("\u274C Firebase Admin SDK initialization failed:", {
+              message: error.message,
+              stack: error.stack
+            });
+            this.initializationPromise = null;
+            throw error;
+          }
+        })();
+        return this.initializationPromise;
+      }
+      /**
+       * Verify Firebase ID token
+       * @param idToken - Firebase ID token from client
+       * @returns Decoded token with user info
+       */
+      async verifyIdToken(idToken) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const decodedToken = await auth.verifyIdToken(idToken);
+          console.log("\u2705 Firebase ID token verified:", { uid: decodedToken.uid, email: decodedToken.email });
+          return decodedToken;
+        } catch (error) {
+          console.error("\u274C Firebase ID token verification failed:", error);
+          throw new Error("Invalid or expired Firebase ID token");
+        }
+      }
+      /**
+       * Get user by email
+       * @param email - User email
+       * @returns Firebase user record
+       */
+      async getUserByEmail(email) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const user = await auth.getUserByEmail(email);
+          return user;
+        } catch (error) {
+          if (error.code === "auth/user-not-found") {
+            return null;
+          }
+          console.error("\u274C Error fetching user by email:", error);
+          throw error;
+        }
+      }
+      /**
+       * Get user by UID
+       * @param uid - Firebase UID
+       * @returns Firebase user record
+       */
+      async getUserByUid(uid) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const user = await auth.getUser(uid);
+          return user;
+        } catch (error) {
+          if (error.code === "auth/user-not-found") {
+            return null;
+          }
+          console.error("\u274C Error fetching user by UID:", error);
+          throw error;
+        }
+      }
+      /**
+       * Create a new Firebase user
+       * @param email - User email
+       * @param password - User password
+       * @returns Created user record
+       */
+      async createUser(email, password) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const user = await auth.createUser({
+            email,
+            password,
+            emailVerified: false
+          });
+          console.log("\u2705 Firebase user created:", { uid: user.uid, email: user.email });
+          return user;
+        } catch (error) {
+          console.error("\u274C Error creating Firebase user:", error);
+          throw error;
+        }
+      }
+      /**
+       * Create a custom token the client exchanges for a Firebase session (signInWithCustomToken)
+       * @param uid - Firebase UID
+       */
+      async createCustomToken(uid) {
+        await this.initialize();
+        return this.firebaseAuth.getAuth().createCustomToken(uid);
+      }
+      /**
+       * Set custom user claims (roles)
+       * @param uid - Firebase UID
+       * @param claims - Custom claims object (e.g., { role: 'admin' })
+       */
+      async setCustomClaims(uid, claims) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          await auth.setCustomUserClaims(uid, claims);
+          console.log("\u2705 Custom claims set for user:", { uid, claims });
+        } catch (error) {
+          console.error("\u274C Error setting custom claims:", error);
+          throw error;
+        }
+      }
+      /**
+       * Get custom claims for a user
+       * @param uid - Firebase UID
+       * @returns Custom claims object
+       */
+      async getCustomClaims(uid) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const user = await auth.getUser(uid);
+          return user.customClaims || {};
+        } catch (error) {
+          console.error("\u274C Error getting custom claims:", error);
+          throw error;
+        }
+      }
+      /**
+       * Send password reset email
+       * @param email - User email
+       */
+      async sendPasswordResetEmail(email) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          const link = await auth.generatePasswordResetLink(email);
+          console.log("\u2705 Password reset link generated for:", email);
+          console.log("\u{1F517} Reset link:", link);
+        } catch (error) {
+          console.error("\u274C Error generating password reset link:", error);
+          throw error;
+        }
+      }
+      /**
+       * Delete a Firebase user
+       * @param uid - Firebase UID
+       */
+      async deleteUser(uid) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          await auth.deleteUser(uid);
+          console.log("\u2705 Firebase user deleted:", uid);
+        } catch (error) {
+          console.error("\u274C Error deleting Firebase user:", error);
+          throw error;
+        }
+      }
+      /**
+       * Update user email
+       * @param uid - Firebase UID
+       * @param newEmail - New email address
+       */
+      async updateUserEmail(uid, newEmail) {
+        await this.initialize();
+        try {
+          const auth = this.firebaseAuth.getAuth();
+          await auth.updateUser(uid, { email: newEmail });
+          console.log("\u2705 User email updated:", { uid, newEmail });
+        } catch (error) {
+          console.error("\u274C Error updating user email:", error);
+          throw error;
+        }
+      }
+      /**
+       * Check if Firebase Admin is initialized
+       */
+      isInitialized() {
+        return this.initialized;
+      }
+    };
+    __name(_FirebaseAdminService, "FirebaseAdminService");
+    FirebaseAdminService = _FirebaseAdminService;
+    firebaseAdminService = new FirebaseAdminService();
+  }
+});
+
+// server/services/openai.service.ts
+import OpenAI from "openai";
+var openai, _OpenAIService, OpenAIService, openaiService;
+var init_openai_service = __esm({
+  "server/services/openai.service.ts"() {
+    "use strict";
+    init_retry();
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || ""
+    });
+    _OpenAIService = class _OpenAIService {
+      constructor() {
+        this.systemPrompt = `You are an educational assistant for a LearnWorlds learning management system. Speak only in French.
+Answer questions about the course content based on the context provided.
+Be helpful, precise, and concise. If you don't know the answer based on the provided context, say so clearly. If you don't know the answer based on the provided context, say so clearly.
+Do not make up information, NEVER. 
+
+IMPORTANT: At the end of EVERY response, you MUST include this exact link in markdown format:
+[Cours d'arthrologie du membre sup\xE9rieur](https://academy.ceerrf.fr/course/arthrologie-du-membre-superieur)
+
+This link must appear at the end of the answer when usefull specially for the first answer.`;
+      }
+      /**
+       * Generates a response for the given question based on relevant content
+       */
+      async generateResponse(question, relevantContent) {
+        try {
+          let contextText = "";
+          if (relevantContent && typeof relevantContent !== "string" && relevantContent.length > 0) {
+            contextText = relevantContent.map((item, index) => {
+              const source = item.metadata?.source ? ` (Source: ${item.metadata.source})` : "";
+              return `Context ${index + 1}${source}:
+${item.content}
+`;
+            }).join("\n");
+          } else if (typeof relevantContent === "string") {
+            contextText = relevantContent;
+          }
+          const userPrompt = `Question: ${question}
+
+Relevant Content:
+${contextText}`;
+          const response = await withRetry(
+            () => openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                { role: "system", content: this.systemPrompt },
+                { role: "user", content: userPrompt }
+              ],
+              temperature: 0.5,
+              max_tokens: 1e3
+            }),
+            {
+              ...RetryPresets.externalApi,
+              operationName: "OpenAI generateResponse"
+            }
+          );
+          return response.choices[0].message.content || "Je n'ai pas pu g\xE9n\xE9rer une r\xE9ponse. Veuillez r\xE9essayer.";
+        } catch (error) {
+          console.error("Error generating OpenAI response:", error);
+          throw new Error(
+            "Impossible de g\xE9n\xE9rer une r\xE9ponse. Service indisponible."
+          );
+        }
+      }
+      /**
+       * Create a completion with custom system prompt (for ECOS evaluation)
+       */
+      async createCompletion(params) {
+        try {
+          const apiParams = {
+            model: params.model,
+            messages: params.messages
+          };
+          if (params.temperature !== void 0) apiParams.temperature = params.temperature;
+          if (params.max_tokens !== void 0) apiParams.max_tokens = params.max_tokens;
+          if (params.max_completion_tokens !== void 0) apiParams.max_completion_tokens = params.max_completion_tokens;
+          if (params.reasoning !== void 0) apiParams.reasoning = params.reasoning;
+          if (params.text !== void 0) apiParams.text = params.text;
+          if (params.response_format !== void 0) apiParams.response_format = params.response_format;
+          const response = await withRetry(
+            () => openai.chat.completions.create(apiParams),
+            {
+              ...RetryPresets.externalApi,
+              operationName: "OpenAI createCompletion"
+            }
+          );
+          return response;
+        } catch (error) {
+          console.error("Error creating OpenAI completion:", error);
+          throw new Error("Impossible de g\xE9n\xE9rer une r\xE9ponse. Service indisponible.");
+        }
+      }
+      /**
+       * Convert natural language question to SQL query
+       */
+      async convertToSQL(question, schema) {
+        try {
+          console.log("Conversion SQL - Question re\xE7ue:", question);
+          console.log("Conversion SQL - Sch\xE9ma fourni:", schema.substring(0, 200) + "...");
+          const prompt = `Tu es un expert en bases de donn\xE9es PostgreSQL. Convertis cette question en langage naturel en requ\xEAte SQL valide.
+
+Base de donn\xE9es PostgreSQL avec le sch\xE9ma suivant :
+${schema}
+
+Question en fran\xE7ais : ${question}
+
+Instructions importantes :
+- G\xE9n\xE8re uniquement une requ\xEAte SELECT (pas d'INSERT, UPDATE, DELETE)
+- Utilise la syntaxe PostgreSQL
+- Utilise UNIQUEMENT les tables et colonnes list\xE9es dans le sch\xE9ma ci-dessus
+- ATTENTION: Dans la table 'exchanges' la colonne utilisateur s'appelle 'utilisateur_email' (PAS 'email')
+- ATTENTION: Dans la table 'daily_counters' la colonne utilisateur s'appelle 'utilisateur_email' (PAS 'email')
+- Pour les questions sur les utilisateurs connect\xE9s/actifs, utilise la table 'exchanges' avec la colonne 'utilisateur_email'
+- Pour les compteurs quotidiens, utilise la table 'daily_counters' avec la colonne 'utilisateur_email'
+- Pour les dates, utilise DATE(timestamp) = CURRENT_DATE pour aujourd'hui
+- Pour compter les utilisateurs uniques: COUNT(DISTINCT utilisateur_email)
+- Inclus les alias de tables si n\xE9cessaire
+- R\xE9ponds uniquement avec la requ\xEAte SQL, sans explication ni markdown
+
+Requ\xEAte SQL :`;
+          const response = await withRetry(
+            () => openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "system",
+                  content: "Tu es un expert en conversion de langage naturel vers SQL. R\xE9ponds uniquement avec la requ\xEAte SQL demand\xE9e, sans formatage markdown."
+                },
+                { role: "user", content: prompt }
+              ],
+              max_tokens: 300,
+              temperature: 0.1
+            }),
+            {
+              ...RetryPresets.externalApi,
+              operationName: "OpenAI convertToSQL"
+            }
+          );
+          let sqlQuery = response.choices[0].message.content?.trim() || "";
+          console.log("R\xE9ponse OpenAI brute:", sqlQuery);
+          sqlQuery = sqlQuery.replace(/```sql\s*/gi, "").replace(/```\s*/gi, "");
+          const sqlMatch = sqlQuery.match(/(SELECT[\s\S]*?)(?:\n\s*$|$)/i);
+          if (sqlMatch) {
+            sqlQuery = sqlMatch[1].trim();
+            console.log("SQL extrait:", sqlQuery);
+          }
+          sqlQuery = sqlQuery.replace(/;\s*$/, "");
+          if (!sqlQuery.toLowerCase().includes("select")) {
+            console.log("\xC9chec validation - pas de SELECT trouv\xE9 dans:", sqlQuery);
+            throw new Error("Aucune requ\xEAte SELECT valide trouv\xE9e dans la r\xE9ponse");
+          }
+          if (!sqlQuery.toLowerCase().trim().startsWith("select")) {
+            console.log("\xC9chec validation - ne commence pas par SELECT:", sqlQuery);
+            throw new Error("La requ\xEAte doit commencer par SELECT");
+          }
+          console.log("SQL final valid\xE9:", sqlQuery);
+          return sqlQuery;
+        } catch (error) {
+          console.error("Error converting to SQL:", error);
+          if (error instanceof Error) {
+            throw new Error(`Impossible de convertir la question en requ\xEAte SQL: ${error.message}`);
+          }
+          throw new Error("Impossible de convertir la question en requ\xEAte SQL");
+        }
+      }
+    };
+    __name(_OpenAIService, "OpenAIService");
+    OpenAIService = _OpenAIService;
+    openaiService = new OpenAIService();
+  }
+});
+
+// server/services/gemini-live-tts.service.ts
+var gemini_live_tts_service_exports = {};
+__export(gemini_live_tts_service_exports, {
+  GeminiLiveTTS: () => GeminiLiveTTS
+});
+import { createRequire } from "module";
+var _GeminiLiveTTS, GeminiLiveTTS;
+var init_gemini_live_tts_service = __esm({
+  "server/services/gemini-live-tts.service.ts"() {
+    "use strict";
+    _GeminiLiveTTS = class _GeminiLiveTTS {
+      constructor() {
+        this.closed = false;
+      }
+      static async connect(params) {
+        const require2 = createRequire(import.meta.url);
+        const { GoogleGenAI, Modality } = require2("@google/genai");
+        const ai = new GoogleGenAI({ apiKey: params.apiKey });
+        const finalVoiceName = params.voiceName || "Puck";
+        console.log(`\u{1F3A4} Initializing Gemini Live with voice: ${finalVoiceName} (requested: ${params.voiceName})`);
+        const session = await ai.live.connect({
+          model: params.model,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: finalVoiceName
+                }
+              }
+            },
+            systemInstruction: params.systemInstruction,
+            tools: params.tools
+          },
+          callbacks: {
+            onopen: /* @__PURE__ */ __name(() => {
+              console.log("\u2705 Gemini Live connection opened");
+            }, "onopen"),
+            onmessage: /* @__PURE__ */ __name((message) => {
+              params.onMessage(message);
+            }, "onmessage"),
+            onerror: /* @__PURE__ */ __name((err) => {
+              console.error("\u274C Gemini Live error:", err);
+              if (params.onError) params.onError(err);
+            }, "onerror"),
+            onclose: /* @__PURE__ */ __name((ev) => {
+              console.log("\u2139\uFE0F Gemini Live connection closed");
+              if (params.onClose) params.onClose(ev);
+            }, "onclose")
+          }
+        });
+        const tts = new _GeminiLiveTTS();
+        tts.session = session;
+        return tts;
+      }
+      async sendToolResponse(toolOutputs) {
+        if (this.closed) return;
+        await this.session.send({
+          toolResponse: {
+            functionResponses: toolOutputs
+          }
+        });
+      }
+      async speakText(text) {
+        if (this.closed) return;
+        if (!text || !text.trim()) return;
+        await this.session.send({
+          clientContent: {
+            turns: [{
+              role: "user",
+              parts: [{ text }]
+            }],
+            turnComplete: true
+          }
+        });
+      }
+      /**
+       * Send raw audio data to Gemini Live for real-time speech recognition and response.
+       * Based on official documentation: session.sendRealtimeInput({ audio: { data, mimeType } })
+       */
+      async sendAudio(audioBase64, mimeType = "audio/pcm;rate=16000") {
+        if (this.closed) return;
+        if (!audioBase64) return;
+        await this.session.sendRealtimeInput({
+          audio: {
+            data: audioBase64,
+            mimeType
+          }
+        });
+      }
+      close() {
+        if (this.closed) return;
+        this.closed = true;
+        try {
+          this.session?.close?.();
+        } catch {
+        }
+      }
+    };
+    __name(_GeminiLiveTTS, "GeminiLiveTTS");
+    GeminiLiveTTS = _GeminiLiveTTS;
+  }
+});
+
+// server/services/voice-webrtc.service.ts
+var voice_webrtc_service_exports = {};
+__export(voice_webrtc_service_exports, {
+  setupVoiceWebRTC: () => setupVoiceWebRTC
+});
+import { createRequire as createRequire2 } from "module";
+import { WebSocketServer } from "ws";
+function safeJsonParse(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+function setupVoiceWebRTC(httpServer) {
+  const wss = new WebSocketServer({ noServer: true });
+  httpServer.on("upgrade", (req, socket, head) => {
+    try {
+      const url = new URL(req.url || "", `http://${req.headers.host}`);
+      if (url.pathname !== "/api/voice/webrtc") return;
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.upgradeReq = req;
+        wss.emit("connection", ws, req);
+      });
+    } catch (e) {
+      socket.destroy();
+    }
+  });
+  wss.on("connection", async (ws, req) => {
+    const url = new URL(req.url || "", `http://${req.headers.host}`);
+    const requestedVoiceType = url.searchParams.get("voiceType") || "male";
+    const voiceName = requestedVoiceType === "female" ? "Kore" : "Puck";
+    console.log(`\u{1F399}\uFE0F New Voice WebRTC connection. VoiceType: ${requestedVoiceType}, Gemini Voice: ${voiceName}`);
+    let wrtc = null;
+    try {
+      const require2 = createRequire2(import.meta.url);
+      try {
+        wrtc = require2("@roamhq/wrtc");
+      } catch {
+        wrtc = require2("wrtc");
+      }
+    } catch {
+      ws.send(JSON.stringify({
+        type: "error",
+        message: "Missing WebRTC dependency. Install with: npm i @roamhq/wrtc (recommended)  OR  npm i wrtc"
+      }));
+      ws.close();
+      return;
+    }
+    let GeminiLiveTTS2 = null;
+    try {
+      const mod = await Promise.resolve().then(() => (init_gemini_live_tts_service(), gemini_live_tts_service_exports));
+      GeminiLiveTTS2 = mod.GeminiLiveTTS;
+    } catch {
+      ws.send(JSON.stringify({ type: "error", message: "Missing Gemini Live bridge. Ensure server/services/gemini-live-tts.service.ts is built and '@google/genai' is installed." }));
+      ws.close();
+      return;
+    }
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    const model = process.env.GEMINI_MODEL || "gemini-2.0-flash-exp";
+    if (!apiKey) {
+      ws.send(JSON.stringify({ type: "error", message: "Missing GEMINI_API_KEY on server." }));
+      ws.close();
+      return;
+    }
+    const pc = new wrtc.RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    let dataChannel = null;
+    console.log(`\u{1F527} Connecting to Gemini Live with config:`, {
+      model,
+      voiceName,
+      requestedVoiceType
+    });
+    const gemini = await GeminiLiveTTS2.connect({
+      apiKey,
+      model,
+      voiceName,
+      systemInstruction: "Tu es un patient virtuel. R\xE9ponds naturellement en fran\xE7ais. Si l'utilisateur semble h\xE9siter ou s'arr\xEAter au milieu d'une phrase, utilise l'outil wait_more pour lui indiquer que tu attends la suite.",
+      tools: [
+        {
+          function_declarations: [
+            {
+              name: "wait_more",
+              description: "Indique au syst\xE8me d'attendre que l'utilisateur finisse sa phrase. \xC0 utiliser si l'utilisateur marque une pause mais semble avoir encore des choses \xE0 dire.",
+              parameters: {
+                type: "OBJECT",
+                properties: {
+                  reason: {
+                    type: "STRING",
+                    description: "La raison pour laquelle on attend (optionnel)."
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      onMessage: /* @__PURE__ */ __name(async (message) => {
+        try {
+          if (message?.serverContent?.interrupted) {
+            dataChannel?.send(JSON.stringify({ type: "interrupt" }));
+            return;
+          }
+          const userTranscription = message?.serverContent?.userTurn?.parts?.[0]?.text;
+          if (userTranscription) {
+            console.log("\u{1F5E3}\uFE0F User transcript from Gemini:", userTranscription);
+            dataChannel?.send(JSON.stringify({ type: "transcript", text: userTranscription, role: "user" }));
+          }
+          const modelTranscription = message?.serverContent?.modelTurn?.parts?.[0]?.text;
+          if (modelTranscription) {
+            dataChannel?.send(JSON.stringify({ type: "transcript", text: modelTranscription, role: "assistant" }));
+          }
+          const toolCall = message?.toolCall;
+          if (toolCall?.functionCalls) {
+            const toolResponses = [];
+            for (const fc of toolCall.functionCalls) {
+              if (fc.name === "wait_more") {
+                console.log("\u{1F916} Bot called wait_more");
+                dataChannel?.send(JSON.stringify({ type: "waiting", message: "Le patient vous attend..." }));
+                toolResponses.push({
+                  name: fc.name,
+                  id: fc.id,
+                  response: { success: true, status: "waiting" }
+                });
+              }
+            }
+            if (toolResponses.length > 0) {
+              await gemini.sendToolResponse(toolResponses);
+            }
+            return;
+          }
+          const parts = message?.serverContent?.modelTurn?.parts;
+          if (!Array.isArray(parts)) {
+            console.log("\u{1F50D} No parts found in message:", JSON.stringify(message, null, 2));
+            return;
+          }
+          console.log(`\u{1F3B5} Processing ${parts.length} parts from Gemini Live (voice: ${voiceName})`);
+          for (const part of parts) {
+            const b64 = part?.inlineData?.data;
+            const mimeType = part?.inlineData?.mimeType;
+            if (!b64) {
+              console.log("\u{1F50D} Part without audio data:", part);
+              continue;
+            }
+            console.log(`\u{1F3B5} Sending audio chunk: ${mimeType}, size: ${b64.length} chars`);
+            dataChannel?.send(JSON.stringify({ type: "audio", data: b64, mimeType }));
+          }
+        } catch (err) {
+          logger.warn("Voice WebRTC: failed to forward Gemini audio chunk", { error: err?.message });
+        }
+      }, "onMessage"),
+      onError: /* @__PURE__ */ __name((err) => {
+        try {
+          dataChannel?.send(JSON.stringify({ type: "error", message: err?.message || "Gemini error" }));
+        } catch {
+        }
+      }, "onError"),
+      onClose: /* @__PURE__ */ __name(() => {
+        try {
+          dataChannel?.send(JSON.stringify({ type: "closed" }));
+        } catch {
+        }
+      }, "onClose")
+    });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+      }
+    };
+    pc.ondatachannel = (event) => {
+      dataChannel = event.channel;
+      dataChannel.onmessage = async (ev) => {
+        const msg = typeof ev.data === "string" ? safeJsonParse(ev.data) : null;
+        if (!msg) return;
+        if (msg.type === "speak" && typeof msg.text === "string") {
+          await gemini.speakText(msg.text);
+        }
+        if (msg.type === "audio" && typeof msg.data === "string") {
+          const mimeType = msg.mimeType || "audio/pcm;rate=16000";
+          await gemini.sendAudio(msg.data, mimeType);
+        }
+      };
+      dataChannel.onclose = () => {
+        try {
+          gemini.close();
+        } catch {
+        }
+        try {
+          pc.close();
+        } catch {
+        }
+      };
+    };
+    ws.on("message", async (raw) => {
+      const msg = safeJsonParse(raw.toString());
+      if (!msg) return;
+      if (msg.type === "offer") {
+        await pc.setRemoteDescription(new wrtc.RTCSessionDescription(msg.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        ws.send(JSON.stringify({ type: "answer", answer }));
+      }
+      if (msg.type === "ice" && msg.candidate) {
+        try {
+          await pc.addIceCandidate(new wrtc.RTCIceCandidate(msg.candidate));
+        } catch (e) {
+          logger.warn("Voice WebRTC: failed to add ICE candidate", { error: e?.message });
+        }
+      }
+      if (msg.type === "close") {
+        try {
+          gemini.close();
+        } catch {
+        }
+        try {
+          pc.close();
+        } catch {
+        }
+        try {
+          ws.close();
+        } catch {
+        }
+      }
+    });
+    ws.on("close", () => {
+      try {
+        gemini.close();
+      } catch {
+      }
+      try {
+        pc.close();
+      } catch {
+      }
+    });
+    ws.send(JSON.stringify({ type: "ready" }));
+  });
+  logger.info("Voice WebRTC signaling enabled", { path: "/api/voice/webrtc" });
+}
+var init_voice_webrtc_service = __esm({
+  "server/services/voice-webrtc.service.ts"() {
+    "use strict";
+    init_logger_service();
+    __name(safeJsonParse, "safeJsonParse");
+    __name(setupVoiceWebRTC, "setupVoiceWebRTC");
   }
 });
 
@@ -46054,7 +46455,7 @@ var init_llm_service = __esm({
       initGeminiService(process.env.GEMINI_API_KEY || "", process.env.GEMINI_MODEL);
     }
     _LLMService = class _LLMService {
-      async generateResponse(question, relevantContent) {
+      async generateResponse(question, relevantContent, options = {}) {
         if (provider === "mistral" && mistralService) {
           const contextText = typeof relevantContent === "string" ? relevantContent : (relevantContent || []).map((item, idx) => `Context ${idx + 1}:
 ${item.content}`).join("\n");
@@ -46065,7 +46466,11 @@ ${item.content}`).join("\n");
 Context:
 ${contextText}` }
           ];
-          return await mistralService.generateResponse(messages, { max_tokens: 1e3, temperature: 0.5 });
+          return await mistralService.generateResponse(messages, {
+            max_tokens: 1e3,
+            temperature: 0.5,
+            ...options.simulatedPatient ? { simulatedPatient: true } : {}
+          });
         }
         return await openaiService.generateResponse(question, relevantContent);
       }
@@ -48882,11 +49287,16 @@ __export(virtual_patient_service_exports, {
   VirtualPatientService: () => VirtualPatientService,
   virtualPatientService: () => virtualPatientService
 });
+import { createHash as createHash2 } from "node:crypto";
 var _VirtualPatientService, VirtualPatientService, virtualPatientService;
 var init_virtual_patient_service = __esm({
   "server/services/virtual-patient.service.ts"() {
     "use strict";
     init_llm_service();
+    init_patient_timing();
+    init_patient_case_adult();
+    init_patient_case_guard();
+    init_mistral_service();
     init_conversation_memory_service();
     init_unified_database_service();
     init_emotional_state_service();
@@ -48904,20 +49314,38 @@ var init_virtual_patient_service = __esm({
        * Generate virtual patient response using AI
        */
       async generatePatientResponse(sessionId, studentEmail, query, scenarioId) {
-        console.log(`\u{1F680} [generatePatientResponse] Starting patient response generation:`, {
-          sessionId,
-          studentEmail,
-          scenarioId,
-          queryPreview: query.substring(0, 50) + "..."
-        });
+        if (shouldUsePatientPilot(scenarioId, process.env.VERCEL_ENV)) {
+          const sourcePrompt = await this.getScenarioPatientPrompt(scenarioId);
+          const strictCase = projectPatientPilot(scenarioId, sourcePrompt);
+          if (!strictCase) throw new VerifiedPatientScenarioUnavailableError("Verified patient scenario unavailable");
+          const reply = await timedPatientPhase("patient_case_resolution", () => resolvePatientCaseReply(strictCase, query, /* @__PURE__ */ new Set()));
+          let response = reply.text;
+          if (strictCase.scenarioId === 4) {
+            const key = "verified-patient-" + createHash2("sha256").update(JSON.stringify([sessionId, studentEmail, strictCase.sourceDigest])).digest("hex");
+            const state = await conversationMemoryService.initializeConversation(
+              key,
+              studentEmail,
+              4,
+              void 0,
+              emotionalStateService.initializeEmotionalState(4)
+            );
+            if (state.emotionalState) {
+              response = adultPsychiatricTone(response, state.emotionalState.agitationLevel);
+              conversationMemoryService.updateEmotionalState(key, emotionalStateService.updateEmotionalState(
+                state.emotionalState,
+                emotionalStateService.analyzeResponseQuality(query, 4),
+                4
+              ));
+            }
+          }
+          return {
+            response,
+            addressing: "\xE9tudiant",
+            medicalContext: this.extractMedicalContext(reply.text),
+            message: "Verified patient reply"
+          };
+        }
         try {
-          console.log(`\u{1F3AD} [generatePatientResponse] scenarioId type check:`, {
-            scenarioId,
-            type: typeof scenarioId,
-            isNumber: typeof scenarioId === "number",
-            isString: typeof scenarioId === "string",
-            value: scenarioId
-          });
           const emotionalStateEnabled = emotionalStateService.isEmotionalStateEnabled(scenarioId || 1);
           console.log(`\u{1F3AD} [generatePatientResponse] Emotional state system status:`, {
             scenarioId: scenarioId || 1,
@@ -48931,31 +49359,35 @@ var init_virtual_patient_service = __esm({
               console.log(`\u{1F3AD} [generatePatientResponse] Initialized emotional state for scenario ${scenarioId}`);
             }
           }
-          const memory = await conversationMemoryService.initializeConversation(
+          const memory = await timedPatientPhase("conversation_memory", () => conversationMemoryService.initializeConversation(
             sessionId,
             studentEmail,
             scenarioId || 1,
             void 0,
             // patientPrompt
             initialEmotionalState
-          );
+          ));
           conversationMemoryService.updateStudentRole(sessionId, query);
           console.log(`\u{1F504} [generatePatientResponse] About to fetch patient prompt for scenario ${scenarioId}`);
           const patientPrompt = await this.getScenarioPatientPrompt(scenarioId);
           const isFallbackPrompt = patientPrompt.includes("Ce prompt g\xE9n\xE9rique doit \xEAtre remplac\xE9");
-          const context = conversationMemoryService.getConversationContext(sessionId);
+          const context2 = conversationMemoryService.getConversationContext(sessionId);
           const addressing = conversationMemoryService.getStudentAddressing(sessionId);
-          const systemPrompt = this.buildSystemPrompt(patientPrompt, context, addressing, scenarioId);
+          const systemPrompt = this.buildSystemPrompt(patientPrompt, context2, addressing, scenarioId);
           const conversationMessages = conversationMemoryService.getConversationMessages(sessionId, 8);
-          const aiResponse = await this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId);
-          const cleanedResponse = this.sanitizePatientResponse(aiResponse);
-          if (emotionalStateEnabled && context.emotionalState) {
+          const aiResponse = await timedPatientPhase("generation", () => this.callOpenAI(systemPrompt, query, conversationMessages, scenarioId));
+          const cleanedResponse = await timedPatientPhase("patient_normalization", () => {
+            const cleaned = this.sanitizePatientResponse(aiResponse);
+            if (!cleaned) throw new EmptyPatientResponseError("No visible patient response after sanitization");
+            return cleaned;
+          });
+          if (emotionalStateEnabled && context2.emotionalState) {
             const responseAnalysis = emotionalStateService.analyzeResponseQuality(
               query,
               scenarioId || 1
             );
             const updatedState = emotionalStateService.updateEmotionalState(
-              context.emotionalState,
+              context2.emotionalState,
               responseAnalysis,
               scenarioId || 1
             );
@@ -48974,13 +49406,13 @@ var init_virtual_patient_service = __esm({
             message: isFallbackPrompt ? "AI patient response generated with fallback prompt" : "AI patient response generated with scenario prompt and memory awareness"
           };
         } catch (error) {
-          console.error("\u274C Error generating patient response:", error);
+          if (error instanceof EmptyPatientResponseError) throw error;
+          patientTimingError("patient_fallback", error);
           const addressing = conversationMemoryService.getStudentAddressing(sessionId);
-          const fallbackMessage = error instanceof Error ? error.message : "Unknown error generating patient response";
           return {
             response: `Excusez-moi ${addressing || ""}, pourriez-vous r\xE9p\xE9ter votre question ? Je n'ai pas bien compris.`,
             addressing: addressing || "\xE9tudiant",
-            message: `AI patient fallback response due to error: ${fallbackMessage}`
+            message: "AI patient fallback response"
           };
         }
       }
@@ -48995,7 +49427,7 @@ var init_virtual_patient_service = __esm({
         }
         try {
           console.log(`\u{1F504} [getScenarioPatientPrompt] Fetching scenarios from database...`);
-          const scenarios = await unifiedDb.getScenarios();
+          const scenarios = await timedPatientPhase("scenario_prompt_fetch", () => unifiedDb.getScenarios());
           console.log(`\u{1F4CA} [getScenarioPatientPrompt] Found ${scenarios.length} scenarios in database`);
           const parsedScenarioId = typeof scenarioId === "string" ? parseInt(scenarioId, 10) : scenarioId;
           const normalizedScenarioId = typeof parsedScenarioId === "number" && !Number.isNaN(parsedScenarioId) ? parsedScenarioId : null;
@@ -49006,19 +49438,16 @@ var init_virtual_patient_service = __esm({
           console.log(`\u{1F50D} [getScenarioPatientPrompt] Scenario ${scenarioId} found:`, scenario ? "YES" : "NO");
           if (scenario?.patient_prompt && scenario.patient_prompt.trim()) {
             console.log(`\u2705 [getScenarioPatientPrompt] Using scenario-specific prompt for scenario ${normalizedScenarioId ?? scenarioId}`);
-            console.log(`\u{1F4DD} [getScenarioPatientPrompt] Prompt preview: "${scenario.patient_prompt.substring(0, 100)}..."`);
             return scenario.patient_prompt;
           }
           if (scenario) {
-            console.warn(`\u26A0\uFE0F [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} exists but has no patient_prompt (${scenario.patient_prompt})`);
+            console.warn(`\u26A0\uFE0F [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} exists but has no patient_prompt`);
           } else {
             console.warn(`\u26A0\uFE0F [getScenarioPatientPrompt] Scenario ${normalizedScenarioId ?? scenarioId} not found in database`);
-            console.log(`\u{1F4CB} [getScenarioPatientPrompt] Available scenario IDs:`, scenarios.map((s) => s.id));
           }
           console.warn(`\u26A0\uFE0F [getScenarioPatientPrompt] Using fallback prompt for scenario ${scenarioId}`);
           return this.getDefaultPatientPrompt();
         } catch (error) {
-          console.error("\u274C [getScenarioPatientPrompt] Error fetching scenario prompt:", error);
           console.warn("\u26A0\uFE0F [getScenarioPatientPrompt] Using emergency fallback prompt due to database error");
           return this.getDefaultPatientPrompt();
         }
@@ -49026,12 +49455,12 @@ var init_virtual_patient_service = __esm({
       /**
        * Build comprehensive system prompt for AI
        */
-      buildSystemPrompt(patientPrompt, context, addressing, scenarioId) {
+      buildSystemPrompt(patientPrompt, context2, addressing, scenarioId) {
         const roleInstruction = this.getRoleInstruction(addressing);
         let emotionalStateInstructions = "";
-        if (context.emotionalState && scenarioId) {
+        if (context2.emotionalState && scenarioId) {
           const behavioralInstructions = emotionalStateService.getBehavioralInstructions(
-            context.emotionalState.agitationLevel,
+            context2.emotionalState.agitationLevel,
             scenarioId
           );
           if (behavioralInstructions) {
@@ -49065,7 +49494,7 @@ INSTRUCTIONS COMPORTEMENTALES CRITIQUES:
 - Ne fais AUCUNE mise en sc\xE8ne: pas de didascalies, pas d'actions, pas de narration
 - N'utilise jamais de texte entre ast\xE9risques (ex: *les bras crois\xE9s*, *voix tremblante*) ni de labels type "Patient:"/"\xC9tudiant:"
 - R\xE9f\xE9rence les informations d\xE9j\xE0 \xE9chang\xE9es dans la conversation
-${context.emotionalState ? "- ADAPTE ton comportement selon ton \xC9TAT \xC9MOTIONNEL ACTUEL d\xE9crit ci-dessus" : ""}
+${context2.emotionalState ? "- ADAPTE ton comportement selon ton \xC9TAT \xC9MOTIONNEL ACTUEL d\xE9crit ci-dessus" : ""}
 
 \u26A0\uFE0F EXEMPLES DE COMPORTEMENT - \xC0 RESPECTER ABSOLUMENT \u26A0\uFE0F
 
@@ -49086,7 +49515,7 @@ Patient: "Bonjour... Qu'est-ce que vous voulez ?"
 Patient: "Pas bien... j'ai mal/peur/les voix me parlent..." (selon ton contexte)
 
 CONTEXTE M\xC9DICAL ACTUEL:
-${context.medicalContext}
+${context2.medicalContext}
 
 R\xC8GLES D'OR:
 1. RESTE FID\xC8LE \xE0 ton prompt de patient - ne jamais en d\xE9vier
@@ -49094,7 +49523,7 @@ R\xC8GLES D'OR:
 3. Ne mentionne JAMAIS de sympt\xF4mes non inclus dans ton contexte
 4. Utilise l'historique de conversation (messages pr\xE9c\xE9dents) pour maintenir la continuit\xE9
 5. Si l'\xE9tudiant a d\xE9j\xE0 pos\xE9 une question similaire, fais r\xE9f\xE9rence \xE0 ta r\xE9ponse pr\xE9c\xE9dente
-${context.emotionalState ? "6. Ton \xE9tat \xE9motionnel \xC9VOLUE en fonction des r\xE9ponses de l'\xE9tudiant - reste coh\xE9rent avec ton niveau d'agitation actuel" : ""}
+${context2.emotionalState ? "6. Ton \xE9tat \xE9motionnel \xC9VOLUE en fonction des r\xE9ponses de l'\xE9tudiant - reste coh\xE9rent avec ton niveau d'agitation actuel" : ""}
 
 IMPORTANT: Respecte ton contexte m\xE9dical \xE0 100%. L'historique complet de la conversation t'est fourni dans les messages pr\xE9c\xE9dents - utilise-le pour assurer la coh\xE9rence.`;
       }
@@ -49142,7 +49571,7 @@ IMPORTANT: Respecte ton contexte m\xE9dical \xE0 100%. L'historique complet de l
         }
         messages.push(...conversationHistory);
         messages.push({ role: "user", content: query });
-        return await llmService.generateResponse("", messages);
+        return await llmService.generateResponse("", messages, { simulatedPatient: true });
       }
       /**
        * Extract medical context from AI response
@@ -49235,6 +49664,7 @@ IMPORTANT : Ce prompt g\xE9n\xE9rique doit \xEAtre remplac\xE9 par un prompt sp\
 import express from "express";
 
 // server/routes.ts
+init_patient_timing();
 import { createServer } from "http";
 
 // node_modules/zod/v3/external.js
@@ -53383,6 +53813,8 @@ var NEVER = INVALID;
 
 // server/routes.ts
 init_unified_database_service();
+init_patient_case_guard();
+init_mistral_service();
 
 // server/services/scenario-sync.service.ts
 init_unified_database_service();
@@ -57616,35 +58048,20 @@ ${transcript}`;
     return null;
   }
   __name(extractScenarioIdFromSessionId, "extractScenarioIdFromSessionId");
-  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), async (req, res) => {
+  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), patientTiming, async (req, res) => {
     try {
       const email = req.firebaseUser.email;
       const { sessionId, query, scenarioId: providedScenarioId } = req.body;
       let resolvedScenarioId = providedScenarioId;
       if (!resolvedScenarioId && sessionId) {
         resolvedScenarioId = extractScenarioIdFromSessionId(sessionId);
-        if (resolvedScenarioId) {
-          console.log(`\u{1F504} [patient-simulator] Extracted scenarioId ${resolvedScenarioId} from sessionId: ${sessionId}`);
-        }
       }
       if (resolvedScenarioId) {
         const numericScenarioId = typeof resolvedScenarioId === "string" ? parseInt(resolvedScenarioId, 10) : resolvedScenarioId;
         if (!isNaN(numericScenarioId)) {
           resolvedScenarioId = numericScenarioId;
-          console.log(`\u2705 [patient-simulator] Converted scenarioId to number:`, numericScenarioId);
         }
       }
-      console.log("\u{1F504} [patient-simulator] Received request:", {
-        email,
-        sessionId,
-        providedScenarioId,
-        resolvedScenarioId,
-        hasQuery: !!query,
-        queryLength: query?.length || 0,
-        scenarioIdType: typeof resolvedScenarioId,
-        scenarioIdValue: resolvedScenarioId,
-        extractionUsed: !providedScenarioId && !!resolvedScenarioId
-      });
       const { virtualPatientService: virtualPatientService2 } = await Promise.resolve().then(() => (init_virtual_patient_service(), virtual_patient_service_exports));
       const validation = virtualPatientService2.validateInput({
         sessionId,
@@ -57658,14 +58075,9 @@ ${transcript}`;
           code: "INVALID_INPUT"
         });
       }
-      console.log(`\u{1F916} AI Patient simulator query from ${email} in session ${sessionId}:`, {
-        query: query.substring(0, 100) + (query.length > 100 ? "..." : ""),
-        resolvedScenarioId,
-        extractionUsed: !providedScenarioId && !!resolvedScenarioId
-      });
       if (resolvedScenarioId) {
         try {
-          const scenarios = await unifiedDb.getScenarios();
+          const scenarios = await timedPatientPhase("scenario_validation", () => unifiedDb.getScenarios());
           const scenario = scenarios.find((s) => s.id === parseInt(resolvedScenarioId.toString(), 10));
           if (!scenario) {
             return res.status(404).json({
@@ -57673,20 +58085,13 @@ ${transcript}`;
               code: "SCENARIO_NOT_FOUND"
             });
           }
-          console.log(`\u2705 Using scenario: "${scenario.title}" (ID: ${resolvedScenarioId}) ${!providedScenarioId ? "[EXTRACTED from sessionId]" : "[PROVIDED directly]"}`);
         } catch (error) {
-          console.error("\u274C Error validating scenario:", error);
           return res.status(500).json({
             error: "Failed to validate scenario",
             code: "SCENARIO_VALIDATION_FAILED"
           });
         }
       }
-      if (!resolvedScenarioId) {
-        console.warn("\u26A0\uFE0F [patient-simulator] No scenarioId provided or extractable - patient will use generic fallback prompt instead of scenario-specific prompt");
-        console.warn("\u26A0\uFE0F [patient-simulator] SessionId pattern for extraction:", sessionId);
-      }
-      console.log(`\u{1F680} [patient-simulator] Calling virtualPatientService.generatePatientResponse with resolved scenarioId: ${resolvedScenarioId}`);
       const patientResponse = await virtualPatientService2.generatePatientResponse(
         sessionId,
         email,
@@ -57694,32 +58099,31 @@ ${transcript}`;
         resolvedScenarioId
       );
       try {
-        await unifiedDb.storeSessionMessage({
-          sessionId,
-          role: "user",
-          question: query,
-          response: ""
+        await timedPatientPhase("persistence", async () => {
+          await unifiedDb.storeSessionMessage({
+            sessionId,
+            role: "user",
+            question: query,
+            response: ""
+          });
+          await unifiedDb.storeSessionMessage({
+            sessionId,
+            role: "assistant",
+            question: "",
+            response: patientResponse.response,
+            content: patientResponse.response
+          });
         });
-        await unifiedDb.storeSessionMessage({
-          sessionId,
-          role: "assistant",
-          question: "",
-          response: patientResponse.response,
-          content: patientResponse.response
-        });
-        console.log("\u2705 Stored user message and assistant response for session:", sessionId);
         try {
-          const { realtimeAnalysisService: realtimeAnalysisService2 } = await Promise.resolve().then(() => (init_realtime_analysis_service(), realtime_analysis_service_exports));
+          const { realtimeAnalysisService: realtimeAnalysisService2 } = await timedPatientPhase("analysis_dispatch", () => Promise.resolve().then(() => (init_realtime_analysis_service(), realtime_analysis_service_exports)));
           realtimeAnalysisService2.analyzeSessionProgress(sessionId, {
             sessionStatus: "in_progress"
           }).catch((err) => {
-            console.warn("\u26A0\uFE0F Real-time analysis failed (non-blocking):", err.message);
+            patientTimingError("analysis_dispatch", err);
           });
         } catch (analysisError) {
-          console.warn("\u26A0\uFE0F Failed to trigger real-time analysis:", analysisError);
         }
       } catch (storageError) {
-        console.warn("\u26A0\uFE0F Failed to store conversation messages:", storageError);
       }
       res.status(200).json({
         response: patientResponse.response,
@@ -57730,11 +58134,16 @@ ${transcript}`;
         message: "AI patient response generated with memory and role awareness"
       });
     } catch (error) {
-      console.error("\u274C Error in AI patient simulator:", error);
+      if (error instanceof VerifiedPatientScenarioUnavailableError) {
+        return res.status(503).json({ code: "PATIENT_SCENARIO_UNAVAILABLE" });
+      }
+      if (error instanceof EmptyPatientResponseError) {
+        return res.status(422).json({ code: "AI_PATIENT_EMPTY_RESPONSE" });
+      }
+      patientTimingError("route", error);
       res.status(500).json({
         error: "Failed to generate AI patient response",
-        code: "AI_PATIENT_SIMULATOR_FAILED",
-        details: process.env.NODE_ENV === "development" ? error.message : "Internal server error"
+        code: "AI_PATIENT_SIMULATOR_FAILED"
       });
     }
   });

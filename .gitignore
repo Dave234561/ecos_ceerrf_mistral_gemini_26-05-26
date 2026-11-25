@@ -21,4 +21,6 @@ api/server/
 !api/_lib/
 !api/_lib/serverless-app.js
 !api/_lib/serverless-app.js.map
+!api/_lib/voice-webrtc.js
+!api/_lib/voice-webrtc.js.map
 .env*.local
