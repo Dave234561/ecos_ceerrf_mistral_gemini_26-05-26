@@ -96,7 +96,9 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
     });
 
     // Bridge to Gemini Live (audio output). We forward audio chunks to the client.
-    const gemini = await GeminiLiveTTS.connect({
+    let gemini: any;
+    try {
+      gemini = await GeminiLiveTTS.connect({
       apiKey,
       model,
       voiceName,
@@ -195,7 +197,15 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
           dataChannel?.send(JSON.stringify({ type: 'closed' }));
         } catch {}
       },
-    });
+      });
+    } catch (error: any) {
+      const message = error?.message || 'Failed to connect to Gemini Live';
+      logger.error('Voice WebRTC: failed to connect to Gemini Live', { error: message });
+      try { ws.send(JSON.stringify({ type: 'error', message })); } catch {}
+      try { pc.close(); } catch {}
+      try { ws.close(); } catch {}
+      return;
+    }
 
     pc.onicecandidate = (event: any) => {
       if (event.candidate) {

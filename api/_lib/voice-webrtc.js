@@ -37096,97 +37096,116 @@ function setupVoiceWebRTC(httpServer) {
       voiceName,
       requestedVoiceType
     });
-    const gemini = await GeminiLiveTTS2.connect({
-      apiKey,
-      model,
-      voiceName,
-      systemInstruction: "Tu es un patient virtuel. R\xE9ponds naturellement en fran\xE7ais. Si l'utilisateur semble h\xE9siter ou s'arr\xEAter au milieu d'une phrase, utilise l'outil wait_more pour lui indiquer que tu attends la suite.",
-      tools: [
-        {
-          function_declarations: [
-            {
-              name: "wait_more",
-              description: "Indique au syst\xE8me d'attendre que l'utilisateur finisse sa phrase. \xC0 utiliser si l'utilisateur marque une pause mais semble avoir encore des choses \xE0 dire.",
-              parameters: {
-                type: "OBJECT",
-                properties: {
-                  reason: {
-                    type: "STRING",
-                    description: "La raison pour laquelle on attend (optionnel)."
+    let gemini;
+    try {
+      gemini = await GeminiLiveTTS2.connect({
+        apiKey,
+        model,
+        voiceName,
+        systemInstruction: "Tu es un patient virtuel. R\xE9ponds naturellement en fran\xE7ais. Si l'utilisateur semble h\xE9siter ou s'arr\xEAter au milieu d'une phrase, utilise l'outil wait_more pour lui indiquer que tu attends la suite.",
+        tools: [
+          {
+            function_declarations: [
+              {
+                name: "wait_more",
+                description: "Indique au syst\xE8me d'attendre que l'utilisateur finisse sa phrase. \xC0 utiliser si l'utilisateur marque une pause mais semble avoir encore des choses \xE0 dire.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    reason: {
+                      type: "STRING",
+                      description: "La raison pour laquelle on attend (optionnel)."
+                    }
                   }
                 }
               }
+            ]
+          }
+        ],
+        onMessage: /* @__PURE__ */ __name(async (message) => {
+          try {
+            if (message?.serverContent?.interrupted) {
+              dataChannel?.send(JSON.stringify({ type: "interrupt" }));
+              return;
             }
-          ]
-        }
-      ],
-      onMessage: /* @__PURE__ */ __name(async (message) => {
-        try {
-          if (message?.serverContent?.interrupted) {
-            dataChannel?.send(JSON.stringify({ type: "interrupt" }));
-            return;
-          }
-          const userTranscription = message?.serverContent?.userTurn?.parts?.[0]?.text;
-          if (userTranscription) {
-            console.log("\u{1F5E3}\uFE0F User transcript from Gemini:", userTranscription);
-            dataChannel?.send(JSON.stringify({ type: "transcript", text: userTranscription, role: "user" }));
-          }
-          const modelTranscription = message?.serverContent?.modelTurn?.parts?.[0]?.text;
-          if (modelTranscription) {
-            dataChannel?.send(JSON.stringify({ type: "transcript", text: modelTranscription, role: "assistant" }));
-          }
-          const toolCall = message?.toolCall;
-          if (toolCall?.functionCalls) {
-            const toolResponses = [];
-            for (const fc of toolCall.functionCalls) {
-              if (fc.name === "wait_more") {
-                console.log("\u{1F916} Bot called wait_more");
-                dataChannel?.send(JSON.stringify({ type: "waiting", message: "Le patient vous attend..." }));
-                toolResponses.push({
-                  name: fc.name,
-                  id: fc.id,
-                  response: { success: true, status: "waiting" }
-                });
+            const userTranscription = message?.serverContent?.userTurn?.parts?.[0]?.text;
+            if (userTranscription) {
+              console.log("\u{1F5E3}\uFE0F User transcript from Gemini:", userTranscription);
+              dataChannel?.send(JSON.stringify({ type: "transcript", text: userTranscription, role: "user" }));
+            }
+            const modelTranscription = message?.serverContent?.modelTurn?.parts?.[0]?.text;
+            if (modelTranscription) {
+              dataChannel?.send(JSON.stringify({ type: "transcript", text: modelTranscription, role: "assistant" }));
+            }
+            const toolCall = message?.toolCall;
+            if (toolCall?.functionCalls) {
+              const toolResponses = [];
+              for (const fc of toolCall.functionCalls) {
+                if (fc.name === "wait_more") {
+                  console.log("\u{1F916} Bot called wait_more");
+                  dataChannel?.send(JSON.stringify({ type: "waiting", message: "Le patient vous attend..." }));
+                  toolResponses.push({
+                    name: fc.name,
+                    id: fc.id,
+                    response: { success: true, status: "waiting" }
+                  });
+                }
               }
+              if (toolResponses.length > 0) {
+                await gemini.sendToolResponse(toolResponses);
+              }
+              return;
             }
-            if (toolResponses.length > 0) {
-              await gemini.sendToolResponse(toolResponses);
+            const parts = message?.serverContent?.modelTurn?.parts;
+            if (!Array.isArray(parts)) {
+              console.log("\u{1F50D} No parts found in message:", JSON.stringify(message, null, 2));
+              return;
             }
-            return;
-          }
-          const parts = message?.serverContent?.modelTurn?.parts;
-          if (!Array.isArray(parts)) {
-            console.log("\u{1F50D} No parts found in message:", JSON.stringify(message, null, 2));
-            return;
-          }
-          console.log(`\u{1F3B5} Processing ${parts.length} parts from Gemini Live (voice: ${voiceName})`);
-          for (const part of parts) {
-            const b64 = part?.inlineData?.data;
-            const mimeType = part?.inlineData?.mimeType;
-            if (!b64) {
-              console.log("\u{1F50D} Part without audio data:", part);
-              continue;
+            console.log(`\u{1F3B5} Processing ${parts.length} parts from Gemini Live (voice: ${voiceName})`);
+            for (const part of parts) {
+              const b64 = part?.inlineData?.data;
+              const mimeType = part?.inlineData?.mimeType;
+              if (!b64) {
+                console.log("\u{1F50D} Part without audio data:", part);
+                continue;
+              }
+              console.log(`\u{1F3B5} Sending audio chunk: ${mimeType}, size: ${b64.length} chars`);
+              dataChannel?.send(JSON.stringify({ type: "audio", data: b64, mimeType }));
             }
-            console.log(`\u{1F3B5} Sending audio chunk: ${mimeType}, size: ${b64.length} chars`);
-            dataChannel?.send(JSON.stringify({ type: "audio", data: b64, mimeType }));
+          } catch (err) {
+            logger.warn("Voice WebRTC: failed to forward Gemini audio chunk", { error: err?.message });
           }
-        } catch (err) {
-          logger.warn("Voice WebRTC: failed to forward Gemini audio chunk", { error: err?.message });
-        }
-      }, "onMessage"),
-      onError: /* @__PURE__ */ __name((err) => {
-        try {
-          dataChannel?.send(JSON.stringify({ type: "error", message: err?.message || "Gemini error" }));
-        } catch {
-        }
-      }, "onError"),
-      onClose: /* @__PURE__ */ __name(() => {
-        try {
-          dataChannel?.send(JSON.stringify({ type: "closed" }));
-        } catch {
-        }
-      }, "onClose")
-    });
+        }, "onMessage"),
+        onError: /* @__PURE__ */ __name((err) => {
+          try {
+            dataChannel?.send(JSON.stringify({ type: "error", message: err?.message || "Gemini error" }));
+          } catch {
+          }
+        }, "onError"),
+        onClose: /* @__PURE__ */ __name(() => {
+          try {
+            dataChannel?.send(JSON.stringify({ type: "closed" }));
+          } catch {
+          }
+        }, "onClose")
+      });
+    } catch (error) {
+      const message = error?.message || "Failed to connect to Gemini Live";
+      logger.error("Voice WebRTC: failed to connect to Gemini Live", { error: message });
+      try {
+        ws.send(JSON.stringify({ type: "error", message }));
+      } catch {
+      }
+      try {
+        pc.close();
+      } catch {
+      }
+      try {
+        ws.close();
+      } catch {
+      }
+      return;
+    }
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
