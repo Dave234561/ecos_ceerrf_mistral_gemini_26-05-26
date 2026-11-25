@@ -1,5 +1,3 @@
-import { createRequire } from 'module';
-
 type LiveMessageHandler = (msg: any) => void;
 
 export class GeminiLiveTTS {
@@ -16,8 +14,7 @@ export class GeminiLiveTTS {
     onError?: (err: any) => void;
     onClose?: (ev: any) => void;
   }): Promise<GeminiLiveTTS> {
-    const require = createRequire(import.meta.url);
-    const { GoogleGenAI, Modality } = require('@google/genai');
+    const { GoogleGenAI, Modality } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: params.apiKey });
 
     const finalVoiceName = params.voiceName || 'Puck';
