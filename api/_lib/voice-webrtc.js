@@ -56,7 +56,11 @@ var init_gemini_live_tts_service = __esm({
               if (params.onError) params.onError(err);
             }, "onerror"),
             onclose: /* @__PURE__ */ __name((ev) => {
-              console.log("\u2139\uFE0F Gemini Live connection closed");
+              console.log("\u2139\uFE0F Gemini Live connection closed", {
+                code: ev?.code,
+                reason: ev?.reason,
+                wasClean: ev?.wasClean
+              });
               if (params.onClose) params.onClose(ev);
             }, "onclose")
           }
@@ -310,6 +314,8 @@ function setupVoiceWebRTC(httpServer) {
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
     let dataChannel = null;
+    let remoteDescriptionReady = false;
+    const pendingRemoteCandidates = [];
     console.log(`\u{1F527} Connecting to Gemini Live with config:`, {
       model,
       voiceName,
@@ -430,8 +436,19 @@ function setupVoiceWebRTC(httpServer) {
         ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
       }
     };
+    pc.onconnectionstatechange = () => {
+      logger.info("Voice WebRTC peer connection state changed", { state: pc.connectionState });
+    };
+    pc.oniceconnectionstatechange = () => {
+      logger.info("Voice WebRTC ICE state changed", { state: pc.iceConnectionState });
+    };
     pc.ondatachannel = (event) => {
       dataChannel = event.channel;
+      logger.info("Voice WebRTC data channel received", { label: dataChannel.label });
+      dataChannel.onopen = () => logger.info("Voice WebRTC data channel opened");
+      dataChannel.onclose = () => logger.info("Voice WebRTC data channel closed");
+      let receivedAudioChunks = 0;
+      let lastAudioLogAt = 0;
       dataChannel.onmessage = async (ev) => {
         const msg = typeof ev.data === "string" ? safeJsonParse(ev.data) : null;
         if (!msg) return;
@@ -439,6 +456,16 @@ function setupVoiceWebRTC(httpServer) {
           await gemini.speakText(msg.text);
         }
         if (msg.type === "audio" && typeof msg.data === "string") {
+          receivedAudioChunks++;
+          const now = Date.now();
+          if (receivedAudioChunks === 1 || now - lastAudioLogAt >= 5e3) {
+            logger.info("Voice WebRTC audio received from browser", {
+              chunks: receivedAudioChunks,
+              base64Chars: msg.data.length,
+              mimeType: msg.mimeType || "audio/pcm;rate=16000"
+            });
+            lastAudioLogAt = now;
+          }
           const mimeType = msg.mimeType || "audio/pcm;rate=16000";
           await gemini.sendAudio(msg.data, mimeType);
         }
@@ -458,16 +485,30 @@ function setupVoiceWebRTC(httpServer) {
       const msg = safeJsonParse(raw.toString());
       if (!msg) return;
       if (msg.type === "offer") {
+        logger.info("Voice WebRTC offer received");
         await pc.setRemoteDescription(new wrtc.RTCSessionDescription(msg.offer));
+        remoteDescriptionReady = true;
+        for (const candidate of pendingRemoteCandidates.splice(0)) {
+          try {
+            await pc.addIceCandidate(new wrtc.RTCIceCandidate(candidate));
+          } catch (error) {
+            logger.warn("Voice WebRTC: failed to apply queued ICE candidate", { error: error?.message });
+          }
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
         ws.send(JSON.stringify({ type: "answer", answer }));
+        logger.info("Voice WebRTC answer sent");
       }
       if (msg.type === "ice" && msg.candidate) {
-        try {
-          await pc.addIceCandidate(new wrtc.RTCIceCandidate(msg.candidate));
-        } catch (e) {
-          logger.warn("Voice WebRTC: failed to add ICE candidate", { error: e?.message });
+        if (!remoteDescriptionReady) {
+          pendingRemoteCandidates.push(msg.candidate);
+        } else {
+          try {
+            await pc.addIceCandidate(new wrtc.RTCIceCandidate(msg.candidate));
+          } catch (e) {
+            logger.warn("Voice WebRTC: failed to add ICE candidate", { error: e?.message });
+          }
         }
       }
       if (msg.type === "close") {
@@ -485,7 +526,11 @@ function setupVoiceWebRTC(httpServer) {
         }
       }
     });
-    ws.on("close", () => {
+    ws.on("close", (code, reason) => {
+      logger.info("Voice WebRTC signaling socket closed", {
+        code,
+        reason: reason.toString()
+      });
       try {
         gemini.close();
       } catch {
@@ -496,6 +541,7 @@ function setupVoiceWebRTC(httpServer) {
       }
     });
     ws.send(JSON.stringify({ type: "ready" }));
+    logger.info("Voice WebRTC signaling ready sent");
   });
   logger.info("Voice WebRTC signaling enabled", { path: "/api/voice/webrtc" });
 }

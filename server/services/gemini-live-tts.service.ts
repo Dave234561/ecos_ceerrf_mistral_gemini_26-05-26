@@ -46,7 +46,11 @@ export class GeminiLiveTTS {
           if (params.onError) params.onError(err);
         },
         onclose: (ev: any) => {
-          console.log('ℹ️ Gemini Live connection closed');
+          console.log('ℹ️ Gemini Live connection closed', {
+            code: ev?.code,
+            reason: ev?.reason,
+            wasClean: ev?.wasClean
+          });
           if (params.onClose) params.onClose(ev);
         },
       },

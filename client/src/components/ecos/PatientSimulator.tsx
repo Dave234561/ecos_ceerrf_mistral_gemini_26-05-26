@@ -191,6 +191,8 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     const dc = pc.createDataChannel('voice');
     dcRef.current = dc;
     let offerSent = false;
+    let remoteDescriptionReady = false;
+    const pendingRemoteCandidates: RTCIceCandidateInit[] = [];
 
     dc.onopen = () => console.info('🎙️ WebRTC data channel is open; audio can be sent');
     dc.onclose = () => console.warn('🎙️ WebRTC data channel closed');
@@ -301,11 +303,25 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
 
       if (msg.type === 'answer' && msg.answer) {
         await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+        remoteDescriptionReady = true;
+        for (const candidate of pendingRemoteCandidates.splice(0)) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (error) {
+            console.warn('🎙️ Failed to apply queued ICE candidate:', error);
+          }
+        }
       }
       if (msg.type === 'ice' && msg.candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        } catch {}
+        if (!remoteDescriptionReady) {
+          pendingRemoteCandidates.push(msg.candidate);
+        } else {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          } catch (error) {
+            console.warn('🎙️ Failed to apply ICE candidate:', error);
+          }
+        }
       }
     };
 
