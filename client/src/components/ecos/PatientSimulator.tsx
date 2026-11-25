@@ -41,7 +41,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
-  const suppressAudioRef = useRef(false);
+  const suppressAudioUntilRef = useRef(0);
   const recognitionRef = useRef<any>(null);
   const voiceEnabledRef = useRef(false);
   const sendMessageRef = useRef<(text: string) => void>(() => {});
@@ -149,7 +149,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
   };
 
   const interruptAudioPlayback = () => {
-    suppressAudioRef.current = true;
+    suppressAudioUntilRef.current = performance.now() + 400;
     try { window.speechSynthesis?.cancel?.(); } catch {}
     try { audioCtxRef.current?.close(); } catch {}
     audioCtxRef.current = null;
@@ -170,7 +170,6 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
     if (!dc || dc.readyState !== 'open') return;
     if (!text || !text.trim()) return;
     try {
-      suppressAudioRef.current = false;
       dc.send(JSON.stringify({ type: 'speak', text }));
     } catch {}
   };
@@ -208,7 +207,7 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
       }
 
       if (msg.type === 'audio' && typeof msg.data === 'string') {
-        if (suppressAudioRef.current) return;
+        if (performance.now() < suppressAudioUntilRef.current) return;
         setIsPatientWaiting(false);
         await playAudioChunk(msg.data, msg.mimeType);
       }
