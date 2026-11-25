@@ -46188,14 +46188,20 @@ function setupVoiceWebRTC(httpServer) {
     const voiceName = requestedVoiceType === "female" ? "Kore" : "Puck";
     console.log(`\u{1F399}\uFE0F New Voice WebRTC connection. VoiceType: ${requestedVoiceType}, Gemini Voice: ${voiceName}`);
     let wrtc = null;
+    let wrtcLoadError;
     try {
       const require2 = createRequire2(import.meta.url);
       try {
         wrtc = require2("@roamhq/wrtc");
-      } catch {
+      } catch (error) {
+        wrtcLoadError = error;
         wrtc = require2("wrtc");
       }
-    } catch {
+    } catch (error) {
+      logger.error("Voice WebRTC: failed to load WebRTC native dependency", {
+        primaryError: wrtcLoadError instanceof Error ? wrtcLoadError.message : String(wrtcLoadError),
+        fallbackError: error instanceof Error ? error.message : String(error)
+      });
       ws.send(JSON.stringify({
         type: "error",
         message: "Missing WebRTC dependency. Install with: npm i @roamhq/wrtc (recommended)  OR  npm i wrtc"

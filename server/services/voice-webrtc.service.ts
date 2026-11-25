@@ -42,14 +42,20 @@ export function setupVoiceWebRTC(httpServer: HttpServer) {
 
     // Lazy imports: do not crash server if deps are missing.
     let wrtc: any = null;
+    let wrtcLoadError: unknown;
     try {
       const require = createRequire(import.meta.url);
       try {
         wrtc = require('@roamhq/wrtc');
-      } catch {
+      } catch (error) {
+        wrtcLoadError = error;
         wrtc = require('wrtc');
       }
-    } catch {
+    } catch (error) {
+      logger.error('Voice WebRTC: failed to load WebRTC native dependency', {
+        primaryError: wrtcLoadError instanceof Error ? wrtcLoadError.message : String(wrtcLoadError),
+        fallbackError: error instanceof Error ? error.message : String(error),
+      });
       ws.send(JSON.stringify({
         type: 'error',
         message: "Missing WebRTC dependency. Install with: npm i @roamhq/wrtc (recommended)  OR  npm i wrtc",
