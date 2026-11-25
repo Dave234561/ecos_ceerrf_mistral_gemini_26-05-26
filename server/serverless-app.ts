@@ -235,16 +235,41 @@ class ServerlessApplication {
       const app = await this.getApplication();
       
       return new Promise<void>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('Request handling timeout'));
+        let settled = false;
+        let timeoutId: ReturnType<typeof setTimeout>;
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          res.off('finish', onFinish);
+          res.off('close', onClose);
+        };
+        const settle = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (error) reject(error);
+          else resolve();
+        };
+        const onFinish = () => settle();
+        const onClose = () => settle();
+        timeoutId = setTimeout(() => {
+          if (!res.headersSent) {
+            res.status(504).json({
+              error: 'Request timeout',
+              message: 'The request took too long to process'
+            });
+            return;
+          }
+          settle(new Error('Request handling timeout'));
         }, this.config.maxResponseTime);
 
+        res.once('finish', onFinish);
+        res.once('close', onClose);
+
         app(req as any, res as any, (err: any) => {
-          clearTimeout(timeoutId);
           if (err) {
-            reject(err);
-          } else {
-            resolve();
+            settle(err);
+          } else if (!res.headersSent) {
+            res.status(404).json({ error: 'Not Found' });
           }
         });
       });

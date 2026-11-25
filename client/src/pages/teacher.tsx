@@ -402,7 +402,7 @@ interface TeacherPageProps {
 }
 
 function TeacherPage({ email: propsEmail }: TeacherPageProps) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [editingScenario, setEditingScenario] = useState<any>(null);
   const [deletingScenario, setDeletingScenario] = useState<any>(null);
@@ -412,6 +412,7 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
 
   // Use email from props (legacy) or from authenticated user
   const email = propsEmail || user?.email || null;
+  const authenticatedEmail = user && !authLoading ? email || '' : '';
 
   // Check if the authenticated user has the correct role for teacher dashboard
   useEffect(() => {
@@ -447,9 +448,9 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
     checkUserRole();
   }, [user, propsEmail]);
 
-  const { data: dashboardData, error: dashboardError, isLoading: isDashboardLoading } = useDashboardData(email || '');
-  const { data: teacherScenarios, error: scenariosError, isLoading: isScenariosLoading } = useTeacherScenarios(email || '');
-  const { data: assignedStudents, isLoading: isStudentsLoading } = useTeacherStudents(email || '');
+  const { data: dashboardData, error: dashboardError, isLoading: isDashboardLoading } = useDashboardData(authenticatedEmail);
+  const { data: teacherScenarios, error: scenariosError, isLoading: isScenariosLoading } = useTeacherScenarios(authenticatedEmail);
+  const { data: assignedStudents, isLoading: isStudentsLoading } = useTeacherStudents(authenticatedEmail);
 
   // Query to fetch all ECOS sessions from all training sessions
   const { data: allEcosSessions, isLoading: isEcosSessionsLoading } = useQuery({
@@ -462,7 +463,7 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
       const dashboard = await apiRequest('GET', `/api/teacher/dashboard?email=${encodeURIComponent(email)}`);
       return dashboard.sessions || [];
     },
-    enabled: !!email,
+    enabled: !!authenticatedEmail,
   });
 
   // Query pour récupérer les détails du rapport
@@ -472,7 +473,7 @@ function TeacherPage({ email: propsEmail }: TeacherPageProps) {
       if (!viewingReport || !email) return null;
       return apiRequest('GET', `/api/ecos/sessions/${viewingReport}/report?email=${encodeURIComponent(email)}`);
     },
-    enabled: !!viewingReport && !!email,
+    enabled: !!viewingReport && !!authenticatedEmail,
   });
 
 

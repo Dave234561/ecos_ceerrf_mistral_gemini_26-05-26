@@ -95616,15 +95616,39 @@ var _ServerlessApplication = class _ServerlessApplication {
     try {
       const app = await this.getApplication();
       return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error("Request handling timeout"));
-        }, this.config.maxResponseTime);
-        app(req, res, (err) => {
+        let settled = false;
+        let timeoutId;
+        const cleanup = /* @__PURE__ */ __name(() => {
           clearTimeout(timeoutId);
+          res.off("finish", onFinish);
+          res.off("close", onClose);
+        }, "cleanup");
+        const settle = /* @__PURE__ */ __name((error) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (error) reject(error);
+          else resolve();
+        }, "settle");
+        const onFinish = /* @__PURE__ */ __name(() => settle(), "onFinish");
+        const onClose = /* @__PURE__ */ __name(() => settle(), "onClose");
+        timeoutId = setTimeout(() => {
+          if (!res.headersSent) {
+            res.status(504).json({
+              error: "Request timeout",
+              message: "The request took too long to process"
+            });
+            return;
+          }
+          settle(new Error("Request handling timeout"));
+        }, this.config.maxResponseTime);
+        res.once("finish", onFinish);
+        res.once("close", onClose);
+        app(req, res, (err) => {
           if (err) {
-            reject(err);
-          } else {
-            resolve();
+            settle(err);
+          } else if (!res.headersSent) {
+            res.status(404).json({ error: "Not Found" });
           }
         });
       });
