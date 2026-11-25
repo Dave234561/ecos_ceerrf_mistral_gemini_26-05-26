@@ -8,7 +8,7 @@
     "api/**/*.js": {
       "maxDuration": 60,
       "memory": 3008,
-      "includeFiles": "node_modules/@roamhq/**/*"
+      "includeFiles": "node_modules/@{google/genai,roamhq}/**/*"
     }
   },
   "installCommand": "npm install",

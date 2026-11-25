@@ -70,6 +70,7 @@ async function buildServer() {
         'fs-extra',
         '@pinecone-database/pinecone',
         '@supabase/supabase-js',
+        '@google/genai',
         '@roamhq/wrtc',
         'wrtc',
         'drizzle-orm',
@@ -96,7 +97,7 @@ async function buildServer() {
       sourcemap: true,
       logLevel: 'info',
       keepNames: true,
-      external: ['ws', '@roamhq/wrtc', 'wrtc'],
+      external: ['ws', '@google/genai', '@roamhq/wrtc', 'wrtc'],
     });
 
     console.log('✅ Bundled WebSocket handler created (api/_lib/voice-webrtc.js)');

@@ -16,6 +16,7 @@ export function useSpeechRecognition({ enabled, onResult, lang = 'fr-FR' }: {
     }
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
+    let shouldRestart = true;
     recognition.lang = lang;
     recognition.continuous = true;
     recognition.interimResults = true; // Enabled interim results for faster feedback
@@ -48,13 +49,16 @@ export function useSpeechRecognition({ enabled, onResult, lang = 'fr-FR' }: {
     recognition.onerror = (event: any) => {
       console.error('🎙️ Speech recognition error:', event.error);
       setError(event.error);
+      if (['audio-capture', 'not-allowed', 'service-not-allowed'].includes(event.error)) {
+        shouldRestart = false;
+      }
       // Don't setListening(false) here if it's going to restart
     };
 
     recognition.onend = () => {
       console.log('🎙️ Speech recognition ended');
       setListening(false);
-      if (enabled) {
+      if (enabled && shouldRestart) {
         console.log('🎙️ Attempting automatic restart...');
         try {
           recognition.start();
