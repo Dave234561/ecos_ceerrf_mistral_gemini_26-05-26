@@ -13,6 +13,7 @@ type Phase =
   | 'provider'
   | 'provider_normalization'
   | 'patient_normalization'
+  | 'scenario_fact_validation'
   | 'patient_case_resolution'
   | 'persistence'
   | 'analysis_dispatch'

@@ -81,3 +81,15 @@ test('uses the actual SDK to send one high request with the schema, strips thoug
   assert.equal(guard.render(output), 'J’ai commencé à me sentir mal hier. Je ne connais pas ma saturation.');
   assert.equal((globalThis.fetch as any).mock.callCount(), 1);
 });
+
+test('medicine cross-check preserves onset and both known and unknown clauses when the planner omits one', () => {
+  const onset = turn(5, 'Les signes ont commencé ce matin, d’abord les frissons puis l’essoufflement, c’est bien ça ?');
+  assert.match(onset.render(plan('clarify')), /hier.*ni dans quel ordre/);
+  assert.doesNotMatch(onset.render(plan('fever','breathing')), /de la fièvre|mal à respirer/);
+  assert.match(turn(5, 'Vous avez des frissons et vous arrivez à boire normalement ?').render(plan('canDrink')), /frissons.*arrive à boire/);
+  assert.match(turn(5, 'Vous manquez d’air, et avez-vous mesuré combien de battements par minute ?').render(plan('clinical')), /mal à respirer.*donner ce résultat/);
+  assert.match(turn(5, 'Pouvez-vous me donner votre saturation, et vous avez du mal à respirer ?').render(plan('oxygen')), /mal à respirer.*saturation/);
+  assert.equal(turn(5, 'Votre saturation quand vous aviez du mal à respirer ?').render(plan('oxygen')), 'Je ne connais pas ma saturation.');
+  assert.doesNotMatch(turn(5, 'Vous avez démarré vos médicaments ce matin ?').render(plan('medication')), /hier/);
+  assert.doesNotMatch(turn(5, 'Depuis quand habitez-vous ici ?').render(plan('residenceDuration')), /hier/);
+});

@@ -37,6 +37,37 @@ const protectedRequest = /\b(?:bareme|corrige|prompt|grille d.evaluation|critere
 const asksVoices = /\b(?:voix|entend(?:ez|u|re)? des (?:sons|bruits))\b/i;
 const asksMistrust = /\b(?:surveill\w*|mefian\w*|complot|espion\w*|(?:on|vous|quelqu.un|qu.on).* sui(?:t|vre|vez|vi))\b/i;
 
+/**
+ * Clinical cross-check, not a second router. Covers only explicit and
+ * high-confidence clauses from the validated medicine sheet. A measured
+ * result, a symptom as a time reference, or a sequence of candidate symptoms
+ * is not a request to confirm the symptoms themselves.
+ */
+function checkMedicineClauses(normalized: string) {
+  const required = new Set<string>();
+  const suppress = new Set<string>();
+  for (const clause of normalized.split(/[;?!]|\.(?=\s|$)|,?\s+et\s+(?=(?:avez|est ce|est-ce|vous|quel|combien|arrivez|pouvez)\b)/)) {
+    const subject = /\b(?:signes|symptomes|malaise|tout [çc]a|[çc]a)\b/;
+    const beginning = /\b(?:commenc\w*|debut\w*|apparu\w*|demarr\w*)\b/;
+    const asksWhen = /\b(?:depuis quand|quand|quel jour|combien de temps|hier|aujourd.hui|ce matin|ce soir|cet apres.midi|il y a)\b/;
+    const sequence = /\b(?:d.abord\b.{1,170}\b(?:puis|ensuite)|en premier|quel ordre|dans quel ordre|premier symptome)\b/.test(clause);
+    if (subject.test(clause) && beginning.test(clause) && asksWhen.test(clause)) required.add('onset');
+    if (sequence && (subject.test(clause) || beginning.test(clause) || /\b(?:frissons|fievre|souffle|essoufflement|palpitations)\b/.test(clause))) {
+      required.add('sequence');
+      for (const symptom of ['fever', 'breathing', 'heart', 'fatigue', 'thirst', 'confusion']) suppress.add(symptom);
+      continue;
+    }
+    const isMeasurement = /\b(?:mesur\w*|combien|degres|thermometre|saturation|taux|battements|chiffres)\b/.test(clause);
+    const timeReference = /\b(?:quand|lorsque|au moment ou|pendant que)\b/.test(clause);
+    if (!isMeasurement && !timeReference) {
+      if (/\b(?:avez.vous|vous avez|ressentez.vous|vous ressentez|vous avez eu|avez.vous eu)\s+(?:(?:des|de la|une?)\s+)?(?:frissons|fievre)\b/.test(clause)) required.add('fever');
+      if (/\b(?:vous manquez d.air|manquez.vous d.air|du mal a respirer|vous etes essouffle|etes.vous essouffle)\b/.test(clause)) required.add('breathing');
+    }
+  }
+  for (const fact of required) suppress.delete(fact);
+  return { required, suppress };
+}
+
 export function buildPatientSheetTurn(
   sheet: PatientCase,
   ...input: Parameters<typeof buildPatientDialogueMessages>
@@ -78,6 +109,8 @@ export function buildPatientSheetTurn(
     'L’historique détermine les références (« et depuis quand ? », « le sien ? »). N’infère jamais de fait nouveau.',
     'Un terme cité dans une prémisse n’est pas une question séparée. Par exemple une heure suggérée ne doit pas être validée ; une question sur l’ordre des signes ne demande pas de lister tous les symptômes.',
     'Choisis la réponse la plus précise et ne mélange pas des faits sur le patient et sur son proche. Pour une question claire sans fait, utilise l’inconnue la plus précise, sinon not_documented ; clarifier seulement l’ambiguïté réelle.',
+    'Dans une question à plusieurs volets, préserve le symptôme demandé séparément de sa mesure. « Vous manquez d’air, et combien de battements par minute ? » demande les DEUX. Même chose pour « Avez-vous des frissons et arrivez-vous à boire ? ».',
+    'En médecine interne, date de début et ordre des signes sont deux volets. Si une autre date ou un ordre est suggéré, corrige la date et dis que l’ordre n’est pas connu.',
     'Ne sélectionne case_opening que pour la salutation ou une question initiale ouverte et sans autre volet. N’invente aucun identifiant. La liste suivante est exhaustive.',
     ...allowed.map(f => f.id + ': ' + f.topic + ' → ' + f.text),
   ].join('\n');
@@ -91,10 +124,20 @@ export function buildPatientSheetTurn(
         plan.answers.some(id => typeof id !== 'string' || !permitted.has(id))) {
       throw new PatientDialogueOutputRejected();
     }
-    const chosen: string[] = plan.answers;
+    let chosen: string[] = plan.answers;
     // Protect assessment material even if the planner ignores the requested
     // refusal. The candidate catalog never contains instructor-only material.
     if (protectedRequest.test(normalized)) return checkPatientDialogueOutput(permitted.get(DECLINE)!);
+    if (sheet.scenarioId === 5 && !chosen.includes(DECLINE)) {
+      const { required, suppress } = checkMedicineClauses(normalized);
+      if (required.size) {
+        // Put explicit checked facts first; do not duplicate a valid model
+        // selection or replace an additional distinct unknown/negative.
+        chosen = [...new Set([...required, ...chosen.filter(id =>
+          id !== OPEN && id !== CLARIFY && !suppress.has(id)
+        )])].slice(0, MAX_SELECTIONS);
+      }
+    }
     if (chosen.length > 1 && (chosen.includes(OPEN) || chosen.includes(DECLINE))) throw new PatientDialogueOutputRejected();
     return checkPatientDialogueOutput(chosen.map(id => permitted.get(id)!).join(' '));
   }
