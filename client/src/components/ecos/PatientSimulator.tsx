@@ -861,6 +861,12 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
                   Le patient n’a renvoyé aucun texte. Votre question est conservée : vous pouvez la reformuler ou réessayer.
                 </p>
               )}
+            {sendMessageMutation.isError &&
+              /"code"\s*:\s*"(?:PATIENT_RESPONSE_REJECTED|PATIENT_HISTORY_UNAVAILABLE|PATIENT_SCENARIO_UNAVAILABLE|PATIENT_PROVIDER_UNAVAILABLE|PATIENT_SESSION_NOT_FOUND|PATIENT_SCENARIO_MISMATCH|AI_PATIENT_SIMULATOR_FAILED)"/.test(sendMessageMutation.error?.message ?? '') && (
+                <p role="alert" className="mt-2 text-sm text-destructive">
+                  Impossible d’afficher la réponse du patient pour le moment. Vous pouvez réessayer sans ressaisir votre question.
+                </p>
+              )}
             {isPatientWaiting && (
               <div className="text-sm text-primary animate-pulse flex items-center justify-center mt-2">
                 <span className="material-icons text-sm mr-1">hourglass_empty</span>
