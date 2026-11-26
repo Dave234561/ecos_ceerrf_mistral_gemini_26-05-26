@@ -6,6 +6,7 @@ import { users, ecosScenarios, ecosSessions, ecosMessages, ecosEvaluations, trai
 import { unifiedDb } from './services/unified-database.service.js';
 import { VerifiedPatientScenarioUnavailableError } from './services/patient-case-guard.js';
 import { EmptyPatientResponseError } from './services/mistral.service.js';
+import { buildPatientDialogueMessages, checkPatientDialogueOutput, PatientDialogueOutputRejected, selectPatientScenario, usesPatientDialoguePreview } from './services/patient-dialogue-preview.js';
 import { eq, and } from 'drizzle-orm';
 import { scenarioSyncService } from './services/scenario-sync.service.js';
 import {
@@ -3238,6 +3239,11 @@ Format JSON attendu :
       const email = req.firebaseUser!.email;
       const { sessionId, query, scenarioId: providedScenarioId } = req.body;
 
+      const dialoguePreview = usesPatientDialoguePreview(process.env);
+      if (dialoguePreview && (typeof sessionId !== 'string' || typeof query !== 'string' || !email)) {
+        return res.status(400).json({ code: 'INVALID_INPUT' });
+      }
+
       // Try to resolve scenarioId with fallback to sessionId parsing
       let resolvedScenarioId = providedScenarioId;
 
@@ -3274,48 +3280,111 @@ Format JSON attendu :
         });
       }
 
-      // Validate scenario exists before processing
-      if (resolvedScenarioId) {
-        try {
-          const scenarios = await timedPatientPhase('scenario_validation', () => unifiedDb.getScenarios());
-          const scenario = scenarios.find(s => s.id === parseInt(resolvedScenarioId.toString(), 10));
-          if (!scenario) {
-            return res.status(404).json({
-              error: `Scenario ${resolvedScenarioId} not found`,
-              code: 'SCENARIO_NOT_FOUND'
+      let dialogueSessionId: number | undefined;
+      let patientResponse: Awaited<ReturnType<typeof virtualPatientService.generatePatientResponse>>;
+      if (dialoguePreview) {
+        const client = await unifiedDb.getClient();
+        const session = await timedPatientPhase('conversation_memory', async () => {
+          const { data, error } = await client.from('sessions')
+            .select('id, student_email, scenario_id').eq('session_id', sessionId).maybeSingle();
+          if (error) throw error;
+          return data;
+        });
+        const selection = selectPatientScenario(session, email, providedScenarioId);
+        if ('error' in selection) {
+          return res.status(selection.error === 'PATIENT_SESSION_NOT_FOUND' ? 404 : 409)
+            .json({ code: selection.error });
+        }
+        dialogueSessionId = Number(session.id);
+        if (!dialogueSessionId || !Number.isSafeInteger(dialogueSessionId)) {
+          return res.status(503).json({ code: 'PATIENT_HISTORY_UNAVAILABLE' });
+        }
+        resolvedScenarioId = selection.id;
+        const [authoredPrompt, history] = await Promise.all([
+          timedPatientPhase('scenario_prompt_fetch', async () => {
+            const { data, error } = await client.from('scenarios')
+              .select('patient_prompt').eq('id', selection.id).maybeSingle();
+            if (error) throw error;
+            return typeof data?.patient_prompt === 'string' ? data.patient_prompt : '';
+          }),
+          timedPatientPhase('conversation_memory', async () => {
+            const { data, error } = await client.from('exchanges')
+              .select('role, question, response').eq('session_id', dialogueSessionId)
+              .in('role', ['user', 'assistant']).order('timestamp', { ascending: false })
+              .order('id', { ascending: false }).limit(8);
+            if (error) throw error;
+            return data ?? [];
+          }),
+        ]);
+        if (!authoredPrompt?.trim()) throw new VerifiedPatientScenarioUnavailableError();
+        // Use the configured preview Mistral path only. Do not silently switch
+        // to the legacy LearnWorlds tutor, the rules engine, or a generic case.
+        const { mistralService } = await import('./services/mistral.service.js');
+        if (process.env.LLM_PROVIDER !== 'mistral' || !process.env.MISTRAL_API_KEY || !mistralService) {
+          return res.status(503).json({ code: 'PATIENT_PROVIDER_UNAVAILABLE' });
+        }
+        const messages = buildPatientDialogueMessages(authoredPrompt, history, query);
+        const raw = await timedPatientPhase('generation', () =>
+          mistralService.generateResponse(messages, { simulatedPatient: true, max_tokens: 360, temperature: 0.2 }));
+        const response = await timedPatientPhase('patient_normalization', () => checkPatientDialogueOutput(raw));
+        patientResponse = { response, addressing: 'étudiant' };
+      } else {
+        // Validate scenario exists before processing
+        if (resolvedScenarioId) {
+          try {
+            const scenarios = await timedPatientPhase('scenario_validation', () => unifiedDb.getScenarios());
+            const scenario = scenarios.find(s => s.id === parseInt(resolvedScenarioId.toString(), 10));
+            if (!scenario) {
+              return res.status(404).json({
+                error: `Scenario ${resolvedScenarioId} not found`,
+                code: 'SCENARIO_NOT_FOUND'
+              });
+            }
+          } catch (error) {
+            return res.status(500).json({
+              error: 'Failed to validate scenario',
+              code: 'SCENARIO_VALIDATION_FAILED'
             });
           }
-        } catch (error) {
-          return res.status(500).json({
-            error: 'Failed to validate scenario',
-            code: 'SCENARIO_VALIDATION_FAILED'
-          });
         }
-      }
 
-      const patientResponse = await virtualPatientService.generatePatientResponse(
-        sessionId,
-        email,
-        query,
-        resolvedScenarioId
-      );
+        patientResponse = await virtualPatientService.generatePatientResponse(
+          sessionId,
+          email,
+          query,
+          resolvedScenarioId
+        );
+      }
 
       // Store conversation in database
       try {
         await timedPatientPhase('persistence', async () => {
-          await unifiedDb.storeSessionMessage({
-            sessionId,
-            role: 'user',
-            question: query,
-            response: ''
-          });
-          await unifiedDb.storeSessionMessage({
-            sessionId,
-            role: 'assistant',
-            question: '',
-            response: patientResponse.response,
-            content: patientResponse.response
-          });
+          if (dialoguePreview) {
+            // Insert both turns atomically, scoped to the session already
+            // authorized above. Server-stored history survives cold starts.
+            const client = await unifiedDb.getClient();
+            if (!dialogueSessionId) throw new Error('Patient session no longer available');
+            const stamp = new Date().toISOString();
+            const { error } = await client.from('exchanges').insert([
+              { session_id: dialogueSessionId, role: 'user', question: query, response: '', timestamp: stamp },
+              { session_id: dialogueSessionId, role: 'assistant', question: patientResponse.response, response: patientResponse.response, timestamp: stamp },
+            ]);
+            if (error) throw error;
+          } else {
+            await unifiedDb.storeSessionMessage({
+              sessionId,
+              role: 'user',
+              question: query,
+              response: ''
+            });
+            await unifiedDb.storeSessionMessage({
+              sessionId,
+              role: 'assistant',
+              question: '',
+              response: patientResponse.response,
+              content: patientResponse.response
+            });
+          }
         });
 
         // Trigger real-time analysis for teacher dashboard
@@ -3331,6 +3400,7 @@ Format JSON attendu :
           // The timed import already recorded the error class.
         }
       } catch (storageError) {
+        if (dialoguePreview) return res.status(503).json({ code: 'PATIENT_HISTORY_UNAVAILABLE' });
         // The persistence phase already recorded the error class.
         // Continue - storage failure shouldn't break patient simulator
       }
@@ -3341,12 +3411,15 @@ Format JSON attendu :
         timestamp: new Date(),
         addressing: patientResponse.addressing,
         medicalContext: patientResponse.medicalContext,
-        message: 'AI patient response generated with memory and role awareness'
+        message: dialoguePreview ? 'Scenario-grounded patient dialogue' : 'AI patient response generated with memory and role awareness'
       });
 
     } catch (error) {
       if (error instanceof VerifiedPatientScenarioUnavailableError) {
         return res.status(503).json({ code: 'PATIENT_SCENARIO_UNAVAILABLE' });
+      }
+      if (error instanceof PatientDialogueOutputRejected) {
+        return res.status(422).json({ code: 'PATIENT_RESPONSE_REJECTED' });
       }
       if (error instanceof EmptyPatientResponseError) {
         return res.status(422).json({ code: 'AI_PATIENT_EMPTY_RESPONSE' });
