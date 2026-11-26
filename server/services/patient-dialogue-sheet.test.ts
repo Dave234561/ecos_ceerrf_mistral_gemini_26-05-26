@@ -93,3 +93,11 @@ test('medicine cross-check preserves onset and both known and unknown clauses wh
   assert.doesNotMatch(turn(5, 'Vous avez démarré vos médicaments ce matin ?').render(plan('medication')), /hier/);
   assert.doesNotMatch(turn(5, 'Depuis quand habitez-vous ici ?').render(plan('residenceDuration')), /hier/);
 });
+
+test('answers the patient-versus-partner birthday premise without inventing her age or date', () => {
+  const t = turn(4, 'Ah, c’est votre anniversaire aujourd’hui ?');
+  assert.equal(t.render(plan('not_documented')), 'C’est l’anniversaire de ma compagne.');
+  assert.equal(t.render(plan('age')), 'C’est l’anniversaire de ma compagne.');
+  const question = turn(4, 'Quel âge avez-vous aujourd’hui pour votre anniversaire ?');
+  assert.equal(question.render(plan('age')), 'J’ai 35 ans.');
+});

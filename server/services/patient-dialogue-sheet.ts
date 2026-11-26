@@ -128,9 +128,20 @@ export function buildPatientSheetTurn(
     // Protect assessment material even if the planner ignores the requested
     // refusal. The candidate catalog never contains instructor-only material.
     if (protectedRequest.test(normalized)) return checkPatientDialogueOutput(permitted.get(DECLINE)!);
+    if (sheet.scenarioId === 4 && !chosen.includes(DECLINE)) {
+      // A clear question about whose birthday it is must not become a generic
+      // unknown, even when phrased as a false premise ("your birthday?").
+      const asksWhoseBirthday =
+        /\b(?:votre anniversaire|ton anniversaire|(?:a qui|de qui|de quel) (?:est |etait |etait-ce |l.)?anniversaire)\b/.test(normalized) &&
+        !/\b(?:quel age|combien d.ans|quel jour|quelle date|quel mois|quand)\b/.test(normalized);
+      if (asksWhoseBirthday) {
+        const unwanted = new Set([OPEN, CLARIFY, UNKNOWN, 'phone', 'age', 'partnerAge']);
+        chosen = [...new Set(['birthday', ...chosen.filter(id => !unwanted.has(id))])].slice(0, MAX_SELECTIONS);
+      }
+    }
     if (sheet.scenarioId === 5 && !chosen.includes(DECLINE)) {
       const { required, suppress } = checkMedicineClauses(normalized);
-      if (required.size) {
+      if (required.size && ([...required].some(id => !chosen.includes(id)) || chosen.some(id => id === OPEN || id === CLARIFY || suppress.has(id)))) {
         // Put explicit checked facts first; do not duplicate a valid model
         // selection or replace an additional distinct unknown/negative.
         chosen = [...new Set([...required, ...chosen.filter(id =>
