@@ -26,7 +26,7 @@ export class MistralService {
     this.model = model;
   }
 
-  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; simulatedPatient?: boolean; patientReasoning?: 'high' } = {}): Promise<string> {
+  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; simulatedPatient?: boolean; patientReasoning?: 'high'; patientSheetSchema?: Record<string, unknown> } = {}): Promise<string> {
     // Adapter les messages pour le typage strict du SDK
     const mappedMessages = messages.map((m) => {
       if (m.role === 'system') return { role: 'system', content: m.content };
@@ -41,6 +41,10 @@ export class MistralService {
       model,
       messages: mappedMessages,
       temperature: options.temperature,
+      ...(high && options.patientSheetSchema ? { responseFormat: {
+        type: 'json_schema' as const,
+        jsonSchema: { name: 'patient_sheet_turn', strict: true, schemaDefinition: options.patientSheetSchema },
+      } } : {}),
       ...(options.max_tokens !== undefined ? { maxTokens: options.max_tokens } : {})
     }), model);
     const choice = response.choices?.[0];

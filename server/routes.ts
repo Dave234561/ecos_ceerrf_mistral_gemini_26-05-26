@@ -4,7 +4,8 @@ import { createServer, type Server } from "http";
 import { z } from "zod";
 import { users, ecosScenarios, ecosSessions, ecosMessages, ecosEvaluations, trainingSessions, trainingSessionStudents, trainingSessionScenarios } from '../shared/schema.js';
 import { unifiedDb } from './services/unified-database.service.js';
-import { VerifiedPatientScenarioUnavailableError } from './services/patient-case-guard.js';
+import { projectPatientPilot, VerifiedPatientScenarioUnavailableError } from './services/patient-case-guard.js';
+import { buildPatientSheetTurn } from './services/patient-dialogue-sheet.js';
 import { EmptyPatientResponseError } from './services/mistral.service.js';
 import { buildPatientDialogueMessages, checkPatientDialogueOutput, PatientDialogueOutputRejected, selectPatientScenario, usesPatientDialoguePreview } from './services/patient-dialogue-preview.js';
 import { eq, and } from 'drizzle-orm';
@@ -3323,18 +3324,21 @@ Format JSON attendu :
         if (process.env.LLM_PROVIDER !== 'mistral' || !process.env.MISTRAL_API_KEY || !mistralService) {
           return res.status(503).json({ code: 'PATIENT_PROVIDER_UNAVAILABLE' });
         }
-        const messages = buildPatientDialogueMessages(authoredPrompt, history, query);
-        // Explicit opt-in for this authenticated preview experiment. Normal
-        // student traffic keeps the existing fast mode.
+        // Keep high as an opt-in on this preview. No free-form fallback if
+        // the authorized patient sheet was edited or has not been reviewed.
         const highThinking = req.body.patientThinking === 'high';
+        const sheet = highThinking ? projectPatientPilot(selection.id, authoredPrompt) : undefined;
+        if (highThinking && !sheet) throw new VerifiedPatientScenarioUnavailableError();
+        const verifiedTurn = sheet ? buildPatientSheetTurn(sheet, authoredPrompt, history, query) : undefined;
         const raw = await timedPatientPhase('generation', () =>
-          mistralService.generateResponse(messages, {
+          mistralService.generateResponse(verifiedTurn?.messages ?? buildPatientDialogueMessages(authoredPrompt, history, query), {
             simulatedPatient: true,
             max_tokens: highThinking ? 1100 : 360,
-            temperature: 0.2,
-            ...(highThinking ? { patientReasoning: 'high' as const } : {}),
+            temperature: highThinking ? 0 : 0.2,
+            ...(verifiedTurn ? { patientReasoning: 'high' as const, patientSheetSchema: verifiedTurn.schema } : {}),
           }));
-        const response = await timedPatientPhase('patient_normalization', () => checkPatientDialogueOutput(raw));
+        const response = await timedPatientPhase(verifiedTurn ? 'scenario_fact_validation' : 'patient_normalization',
+          () => verifiedTurn ? verifiedTurn.render(raw) : checkPatientDialogueOutput(raw));
         patientResponse = { response, addressing: 'étudiant' };
       } else {
         // Validate scenario exists before processing
