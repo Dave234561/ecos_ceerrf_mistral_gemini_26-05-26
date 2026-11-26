@@ -1,3 +1,5 @@
+import { patientTiming, patientTimingError } from './services/patient-timing.js';
+import { handleVerifiedPatientRelease, generateVerifiedPatientTurn, usesVerifiedPatientRelease } from './services/verified-patient-release.js';
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { z } from "zod";
@@ -3226,11 +3228,33 @@ Format JSON attendu :
 
   // AI-powered virtual patient simulator with memory and role recognition
   // 🔒 SECURED: Requires student authentication via Firebase token
-  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), async (req: FirebaseAuthRequest, res: Response) => {
+  app.post("/api/ecos/patient-simulator", requireStudent, apiRateLimit.middleware(), validateContentType(), validateRequestSize(), patientTiming, async (req: FirebaseAuthRequest, res: Response) => {
     try {
       // SECURITY: Email retrieved from verified Firebase token (NOT from body)
       const email = req.firebaseUser!.email;
       const { sessionId, query, scenarioId: providedScenarioId } = req.body;
+
+      if (usesVerifiedPatientRelease(process.env)) {
+        try {
+          const verified = await handleVerifiedPatientRelease({ sessionId, query, email, suppliedScenario: providedScenarioId }, {
+            loadClient: () => unifiedDb.getClient(), generate: generateVerifiedPatientTurn,
+          });
+          if (verified) {
+            if ('code' in verified) return res.status(verified.status).json({ code: verified.code });
+            const { realtimeAnalysisService } = await import('./services/realtime-analysis.service.js').catch(() => ({ realtimeAnalysisService: null }));
+            realtimeAnalysisService?.analyzeSessionProgress(sessionId, { sessionStatus: 'in_progress' })
+              .catch(error => patientTimingError('analysis_dispatch', error));
+            return res.status(200).json({
+              response: verified.response, sessionId, timestamp: new Date(), addressing: 'étudiant',
+              message: 'Scenario-grounded patient dialogue',
+            });
+          }
+        } catch (error) {
+          patientTimingError('route', error);
+          return res.status(503).json({ code: 'PATIENT_VERIFIED_TURN_UNAVAILABLE' });
+        }
+      }
+
 
       // Try to resolve scenarioId with fallback to sessionId parsing
       let resolvedScenarioId = providedScenarioId;
