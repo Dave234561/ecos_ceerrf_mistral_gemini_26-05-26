@@ -3324,8 +3324,16 @@ Format JSON attendu :
           return res.status(503).json({ code: 'PATIENT_PROVIDER_UNAVAILABLE' });
         }
         const messages = buildPatientDialogueMessages(authoredPrompt, history, query);
+        // Explicit opt-in for this authenticated preview experiment. Normal
+        // student traffic keeps the existing fast mode.
+        const highThinking = req.body.patientThinking === 'high';
         const raw = await timedPatientPhase('generation', () =>
-          mistralService.generateResponse(messages, { simulatedPatient: true, max_tokens: 360, temperature: 0.2 }));
+          mistralService.generateResponse(messages, {
+            simulatedPatient: true,
+            max_tokens: highThinking ? 1100 : 360,
+            temperature: 0.2,
+            ...(highThinking ? { patientReasoning: 'high' as const } : {}),
+          }));
         const response = await timedPatientPhase('patient_normalization', () => checkPatientDialogueOutput(raw));
         patientResponse = { response, addressing: 'étudiant' };
       } else {

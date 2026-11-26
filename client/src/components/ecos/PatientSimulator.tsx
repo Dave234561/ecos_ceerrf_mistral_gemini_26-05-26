@@ -482,7 +482,9 @@ export default function PatientSimulator({ sessionId, email, onSessionEnd, onSho
         email,
         sessionId,
         query,
-        scenarioId: resolvedScenarioId ?? undefined
+        scenarioId: resolvedScenarioId ?? undefined,
+        ...(new URLSearchParams(window.location.search).get('patientThinking') === 'high'
+          ? { patientThinking: 'high' } : {}),
       });
     },
     onSuccess: (data, query) => {

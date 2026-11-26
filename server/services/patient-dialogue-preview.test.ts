@@ -82,3 +82,28 @@ test('real Mistral adapter serializes the three cases with structured roles and 
     assert.ok(!JSON.stringify(wire).includes('LearnWorlds'));
   }
 });
+
+test('opt-in Small 4 high uses a separate transport and does not expose internal or truncated text', async t => {
+  const { MistralService, EmptyPatientResponseError } = await import('./mistral.service.js');
+  const wire: any[] = [];
+  t.mock.method(globalThis, 'fetch', async (req: Request) => {
+    wire.push(await req.json());
+    return Response.json({
+      id: 'fictional', object: 'chat.completion', created: 1, model: 'mistral-small-2603',
+      usage: { prompt_tokens: 20, completion_tokens: 12, total_tokens: 32 },
+      choices: [{ index: 0, message: { role: 'assistant', content: [
+        { type: 'thinking', thinking: [{ type: 'text', text: 'INTERNAL_ONLY' }] },
+        { type: 'text', text: 'Réponse visible.' },
+      ] }, finish_reason: wire.length === 3 ? 'length' : 'stop' }],
+    });
+  });
+  const service = new MistralService('fake-api-key');
+  const messages = buildPatientDialogueMessages('Cas fictif', [], 'Depuis quand ?');
+  const high = { simulatedPatient: true, patientReasoning: 'high' as const, max_tokens: 1100 };
+  assert.equal(await service.generateResponse(messages, high), 'Réponse visible.');
+  assert.equal(await service.generateResponse(messages, { simulatedPatient: true, max_tokens: 360 }), 'Réponse visible.');
+  await assert.rejects(service.generateResponse(messages, high), EmptyPatientResponseError);
+  assert.deepEqual(wire.map(x => [x.model, x.reasoning_effort, x.max_tokens]), [
+    ['mistral-small-2603', 'high', 1100], ['mistral-small-2603', 'none', 360], ['mistral-small-2603', 'high', 1100],
+  ]);
+});

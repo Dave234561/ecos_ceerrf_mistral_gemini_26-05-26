@@ -6,25 +6,27 @@ export class EmptyPatientResponseError extends Error {}
 export class MistralService {
   private client: Mistral;
   private patientSmallClient: Mistral;
+  private patientHighClient: Mistral;
   private model: string;
 
   constructor(apiKey: string, model: string = 'mistral-large-latest') {
     this.client = new Mistral({ apiKey });
     // SDK 1.x strips reasoning_effort during serialization. Add it only for the
     // explicitly selected patient client, retaining SDK authentication and retries.
-    const patientHttpClient = new HTTPClient().addHook('beforeRequest', async (request) => {
+    const buildPatientClient = (effort: 'none' | 'high') => new Mistral({ apiKey, httpClient: new HTTPClient().addHook('beforeRequest', async (request) => {
       if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/chat/completions') return request;
       const payload = await request.clone().json() as Record<string, unknown>;
-      const body = JSON.stringify({ ...payload, reasoning_effort: 'none' });
+      const body = JSON.stringify({ ...payload, reasoning_effort: effort });
       const headers = new Headers(request.headers);
       headers.delete('content-length');
       return new Request(request, { body, headers });
-    });
-    this.patientSmallClient = new Mistral({ apiKey, httpClient: patientHttpClient });
+    }) });
+    this.patientSmallClient = buildPatientClient('none');
+    this.patientHighClient = buildPatientClient('high');
     this.model = model;
   }
 
-  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; simulatedPatient?: boolean } = {}): Promise<string> {
+  async generateResponse(messages: Array<{ role: string; content: string }>, options: { max_tokens?: number; temperature?: number; simulatedPatient?: boolean; patientReasoning?: 'high' } = {}): Promise<string> {
     // Adapter les messages pour le typage strict du SDK
     const mappedMessages = messages.map((m) => {
       if (m.role === 'system') return { role: 'system', content: m.content };
@@ -32,7 +34,8 @@ export class MistralService {
       if (m.role === 'assistant') return { role: 'assistant', content: m.content };
       return m;
     });
-    const client = options.simulatedPatient ? this.patientSmallClient : this.client;
+    const high = options.simulatedPatient && options.patientReasoning === 'high';
+    const client = high ? this.patientHighClient : options.simulatedPatient ? this.patientSmallClient : this.client;
     const model = options.simulatedPatient ? 'mistral-small-2603' : this.model;
     const response = await timedPatientPhase('provider', () => client.chat.complete({
       model,
@@ -44,6 +47,9 @@ export class MistralService {
     const content = choice?.message?.content;
     logMistralCompletion(choice?.finishReason, response.usage, content);
     return timedPatientPhase('provider_normalization', () => {
+      if (high && (choice?.finishReason === 'length' || choice?.finishReason === 'model_length')) {
+        throw new EmptyPatientResponseError('Patient answer not complete within the reasoning token budget');
+      }
       const text = typeof content === 'string'
         ? content
         : Array.isArray(content)
